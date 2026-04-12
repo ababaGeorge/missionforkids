@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "369701963332",
+    "project_id": "mission-for-kids",
+    "storage_bucket": "mission-for-kids.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:369701963332:android:c4bd899fc986ee7d2d1e11",
+        "android_client_info": {
+          "package_name": "com.missionforkids.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "369701963332-gnnr5780a6f9kldrdibdq74e2eue1l55.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCpOC71m9fVvg44hujLjILw90t9FaNRUxQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "369701963332-gnnr5780a6f9kldrdibdq74e2eue1l55.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "369701963332-9df7o0gdusvvlr3m336pipbt562k5jvm.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.missionforkids.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

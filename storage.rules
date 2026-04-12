@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // 檢查使用者是否為指定家庭的成員
+    function isFamilyMember(familyId) {
+      return firestore.exists(/databases/(default)/documents/familyMemberships/$(request.auth.uid + '_' + familyId));
+    }
+
+    // 家庭任務照片：families/{familyId}/submissions/{fileName}
+    match /families/{familyId}/submissions/{fileName} {
+      // 家庭成員可讀取
+      allow read: if request.auth != null && isFamilyMember(familyId);
+
+      // 家庭成員可上傳，限制 5MB、僅限圖片
+      allow create: if request.auth != null
+                    && isFamilyMember(familyId)
+                    && request.resource.size < 5 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+
+      // 照片不可覆蓋或刪除
+      allow update, delete: if false;
+    }
+
+    // AI Playground 照片：playground/{userId}/{fileName}
+    match /playground/{userId}/{fileName} {
+      // 只有本人可讀取
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // 只有本人可上傳，限制 5MB、僅限圖片
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.size < 5 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+
+      allow update, delete: if false;
+    }
+
+    // 其他路徑一律拒絕
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

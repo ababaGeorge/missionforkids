@@ -1,0 +1,94 @@
+{
+  "common": {
+    "loading": "載入中...",
+    "error": "發生錯誤",
+    "retry": "重試",
+    "cancel": "取消",
+    "confirm": "確認",
+    "save": "儲存",
+    "delete": "刪除",
+    "back": "返回",
+    "done": "完成",
+    "points": "點",
+    "photo": "照片"
+  },
+  "auth": {
+    "signInWithApple": "使用 Apple 登入",
+    "signInWithGoogle": "使用 Google 登入",
+    "signOut": "登出",
+    "welcome": "歡迎來到任務獎勵"
+  },
+  "family": {
+    "createFamily": "建立家庭",
+    "familyName": "家庭名稱",
+    "inviteMember": "邀請成員",
+    "addChild": "新增孩子",
+    "members": "家庭成員",
+    "childName": "孩子名稱",
+    "birthday": "生日"
+  },
+  "tasks": {
+    "title": "任務",
+    "createTask": "建立任務",
+    "taskName": "任務名稱",
+    "assignTo": "指派給",
+    "dueDate": "截止日期",
+    "pointsReward": "完成點數",
+    "submitPhoto": "拍照提交",
+    "pendingReview": "待審核",
+    "approved": "已通過",
+    "rejected": "未通過",
+    "tryAgain": "再試一次！",
+    "uploadFailed": "無法上傳照片，請檢查網路",
+    "noTasks": "目前沒有任務",
+    "completed": "已完成",
+    "reviewMode": "審核模式",
+    "manual": "人工審核",
+    "semiAuto": "半自動"
+  },
+  "points": {
+    "balance": "點數餘額",
+    "history": "點數紀錄",
+    "earned": "獲得",
+    "spent": "花費",
+    "grantPoints": "直接給點",
+    "grantReason": "給點名目"
+  },
+  "rewards": {
+    "store": "獎勵商店",
+    "createItem": "新增商品",
+    "redeem": "兌換",
+    "itemName": "商品名稱",
+    "pointCost": "所需點數",
+    "physical": "實體獎勵",
+    "virtual": "虛擬獎勵",
+    "myOrders": "我的訂單",
+    "pendingOrders": "待處理訂單",
+    "markDelivered": "標記已交付",
+    "confirmReceived": "確認收到",
+    "cancelOrder": "取消訂單",
+    "orderApproved": "訂單已核准",
+    "orderDelivered": "已交付",
+    "orderCompleted": "已完成",
+    "orderCancelled": "已取消",
+    "orderRejected": "已拒絕",
+    "notEnoughPoints": "點數不足"
+  },
+  "ai": {
+    "title": "AI 實驗室",
+    "subtitle": "拍張照片，讓 AI 告訴你它看到了什麼！",
+    "thinking": "AI 正在看...",
+    "takePhoto": "點這裡拍照",
+    "analyze": "問問 AI！",
+    "tryAgain": "再拍一張",
+    "error": "AI 無法分析照片，晚點再試",
+    "cameraNeeded": "需要相機權限"
+  },
+  "review": {
+    "pendingReviews": "待審核項目",
+    "approve": "通過",
+    "reject": "退回",
+    "addNote": "新增備註（選填）",
+    "noReviews": "目前沒有待審核項目"
+  }
+}

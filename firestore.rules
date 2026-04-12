@@ -1,0 +1,110 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========== Helper Functions ==========
+
+    // 取得已登入使用者的 ID
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 檢查使用者是否為指定家庭的成員
+    function isFamilyMember(familyId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId));
+    }
+
+    // 檢查使用者是否為指定家庭的家長
+    function isFamilyParent(familyId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.role == 'parent' &&
+        get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.status == 'active';
+    }
+
+    // ========== Users ==========
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ========== Families ==========
+    match /families/{familyId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isFamilyParent(familyId);
+    }
+
+    // ========== Family Memberships ==========
+    match /familyMemberships/{membershipId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+
+    // ========== Invite Codes ==========
+    match /inviteCodes/{codeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+
+    // ========== Tasks ==========
+    match /tasks/{taskId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    // ========== Task Instances ==========
+    match /taskInstances/{instanceId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+
+    // ========== Task Submissions ==========
+    match /taskSubmissions/{submissionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      // Submissions 是 immutable，不允許 client 修改
+    }
+
+    // ========== Point Wallets ==========
+    // 只有 Cloud Functions (admin SDK) 可以寫入
+    match /pointWallets/{walletId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ========== Point Transactions ==========
+    // 只有 Cloud Functions (admin SDK) 可以寫入
+    match /pointTransactions/{transactionId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ========== Reward Items ==========
+    match /rewardItems/{itemId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+
+    // ========== Reward Orders ==========
+    match /rewardOrders/{orderId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+
+    // ========== AI Playground Logs ==========
+    match /aiPlaygroundLogs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+  }
+}

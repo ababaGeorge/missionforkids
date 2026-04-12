@@ -1,0 +1,94 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "delete": "Delete",
+    "back": "Back",
+    "done": "Done",
+    "points": "pts",
+    "photo": "Photo"
+  },
+  "auth": {
+    "signInWithApple": "Sign in with Apple",
+    "signInWithGoogle": "Sign in with Google",
+    "signOut": "Sign Out",
+    "welcome": "Welcome to Mission for Kids"
+  },
+  "family": {
+    "createFamily": "Create Family",
+    "familyName": "Family Name",
+    "inviteMember": "Invite Member",
+    "addChild": "Add Child",
+    "members": "Family Members",
+    "childName": "Child's Name",
+    "birthday": "Birthday"
+  },
+  "tasks": {
+    "title": "Tasks",
+    "createTask": "Create Task",
+    "taskName": "Task Name",
+    "assignTo": "Assign To",
+    "dueDate": "Due Date",
+    "pointsReward": "Points Reward",
+    "submitPhoto": "Take Photo to Submit",
+    "pendingReview": "Pending Review",
+    "approved": "Approved",
+    "rejected": "Not Approved",
+    "tryAgain": "Try again!",
+    "uploadFailed": "Photo upload failed, check your connection",
+    "noTasks": "No tasks yet",
+    "completed": "Completed",
+    "reviewMode": "Review Mode",
+    "manual": "Manual Review",
+    "semiAuto": "Semi-Auto"
+  },
+  "points": {
+    "balance": "Point Balance",
+    "history": "Point History",
+    "earned": "Earned",
+    "spent": "Spent",
+    "grantPoints": "Grant Points",
+    "grantReason": "Reason"
+  },
+  "rewards": {
+    "store": "Reward Store",
+    "createItem": "Add Item",
+    "redeem": "Redeem",
+    "itemName": "Item Name",
+    "pointCost": "Point Cost",
+    "physical": "Physical Reward",
+    "virtual": "Virtual Reward",
+    "myOrders": "My Orders",
+    "pendingOrders": "Pending Orders",
+    "markDelivered": "Mark Delivered",
+    "confirmReceived": "Confirm Received",
+    "cancelOrder": "Cancel Order",
+    "orderApproved": "Approved",
+    "orderDelivered": "Delivered",
+    "orderCompleted": "Completed",
+    "orderCancelled": "Cancelled",
+    "orderRejected": "Rejected",
+    "notEnoughPoints": "Not enough points"
+  },
+  "ai": {
+    "title": "AI Playground",
+    "subtitle": "Take a photo and let AI tell you what it sees!",
+    "thinking": "AI is looking...",
+    "takePhoto": "Tap to take a photo",
+    "analyze": "Ask AI!",
+    "tryAgain": "Try another photo",
+    "error": "AI couldn't analyze the photo, try again later",
+    "cameraNeeded": "Camera permission is needed"
+  },
+  "review": {
+    "pendingReviews": "Pending Reviews",
+    "approve": "Approve",
+    "reject": "Reject",
+    "addNote": "Add note (optional)",
+    "noReviews": "No pending reviews"
+  }
+}
