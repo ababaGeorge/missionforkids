@@ -50,10 +50,7 @@ module.exports = function withModularHeaders(config) {
       target.build_configurations.each do |bc|
         bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
         # Suppress Xcode 16 template keyword warning in gRPC/abseil
-        existing = bc.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
-        unless existing.include?('-Wno-missing-template-arg-list-after-template-kw')
-          bc.build_settings['OTHER_CPLUSPLUSFLAGS'] = existing + ' -Wno-missing-template-arg-list-after-template-kw'
-        end
+        bc.build_settings['OTHER_CPLUSPLUSFLAGS'] = '$(inherited) -Wno-missing-template-arg-list-after-template-kw'
       end
     end`;
 
