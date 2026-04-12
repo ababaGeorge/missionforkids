@@ -49,8 +49,7 @@ module.exports = function withModularHeaders(config) {
       const snippet = `\n    ${postMarker}
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
-        bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
-        bc.build_settings['OTHER_CPLUSPLUSFLAGS'] = '$(inherited) -Wno-missing-template-arg-list-after-template-kw -Wno-comma -Wno-shorten-64-to-32'
+        bc.build_settings['OTHER_CPLUSPLUSFLAGS'] = '$(inherited) -Wno-missing-template-arg-list-after-template-kw'
         bc.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       end
     end`;
