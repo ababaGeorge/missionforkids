@@ -3,12 +3,11 @@ const { withPodfile } = require('@expo/config-plugins');
 /**
  * 1. 強制 Firebase iOS SDK 10.29.0
  * 2. 為 Firebase Swift pods 的 ObjC 依賴啟用 modular headers
- *
- * 只列出 pod install 錯誤訊息中要求的 pods。
- * 這些是 Firebase 的子依賴，版本由 $FirebaseSDKVersion 控制，不會衝突。
+ * 3. 修復 gRPC/abseil C++ 編譯問題（std::result_of 在 C++17 被移除）
  */
 module.exports = function withModularHeaders(config) {
   return withPodfile(config, (config) => {
+    // ---- 1. 強制 Firebase iOS SDK 版本 ----
     const sdkMarker = '# [withFirebaseSDK]';
     if (!config.modResults.contents.includes(sdkMarker)) {
       config.modResults.contents =
@@ -16,7 +15,7 @@ module.exports = function withModularHeaders(config) {
         config.modResults.contents;
     }
 
-    // 只列出 pod install 錯誤中要求 modular headers 的 pods
+    // ---- 2. modular headers ----
     const pods = [
       'GoogleUtilities',
       'FirebaseCore',
@@ -36,6 +35,26 @@ module.exports = function withModularHeaders(config) {
       config.modResults.contents = config.modResults.contents.replace(
         /use_react_native!\(([^)]*)\)/,
         `use_react_native!($1)\n\n    ${podMarker}\n${podLines}`
+      );
+    }
+
+    // ---- 3. post_install: gRPC C++14 fix ----
+    const postMarker = '# [withModularHeaders:post_install]';
+    if (!config.modResults.contents.includes(postMarker)) {
+      const snippet = `
+    ${postMarker}
+    # Fix gRPC/abseil std::result_of removal in C++17
+    installer.pods_project.targets.each do |target|
+      if ['gRPC-Core', 'gRPC-C++', 'abseil', 'BoringSSL-GRPC'].include?(target.name)
+        target.build_configurations.each do |bc|
+          bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
+        end
+      end
+    end`;
+
+      config.modResults.contents = config.modResults.contents.replace(
+        /post_install do \|installer\|/,
+        `post_install do |installer|${snippet}`
       );
     }
 
