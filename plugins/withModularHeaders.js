@@ -1,14 +1,11 @@
 const { withPodfile } = require('@expo/config-plugins');
 
 /**
- * 為 Firebase Swift pods 的 ObjC 依賴啟用 modular_headers。
+ * 為 Firebase Swift pods 的 ObjC 依賴啟用 modular_headers，
+ * 並設定 CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES
+ * 讓 RNFBStorage/RNFBAuth 等 target 能找到 Firebase Swift headers。
  *
- * 策略：在 target block 內加入顯式的 pod 宣告 with :modular_headers => true。
- * 這些 pods 已經被 auto-linking 安裝，這裡只是覆蓋設定。
- *
- * 不能用：
- * - 全域 use_modular_headers!（gRPC-Core modulemap 找不到）
- * - pre_install 改 build_type（CocoaPods 不支援這種方式）
+ * 參考：https://github.com/invertase/react-native-firebase/issues/8657
  */
 module.exports = function withModularHeaders(config) {
   return withPodfile(config, (config) => {
@@ -27,8 +24,10 @@ module.exports = function withModularHeaders(config) {
       'FirebaseFirestoreInternal',
       'FirebaseSharedSwift',
       'FirebaseStorage',
+      'FirebaseStorageInternal',
       'RecaptchaInterop',
       'FirebaseMessagingInterop',
+      'GTMSessionFetcher',
     ];
 
     const podLines = pods
@@ -42,6 +41,21 @@ module.exports = function withModularHeaders(config) {
       config.modResults.contents = podfile.replace(
         /use_react_native!\(([^)]*)\)/,
         `use_react_native!($1)\n\n    ${marker}\n${podLines}`
+      );
+    }
+
+    // 在 post_install 中設定允許非 modular includes
+    const postInstallMarker = '# [withModularHeaders:post_install]';
+    if (!config.modResults.contents.includes(postInstallMarker)) {
+      const postInstallSnippet = `
+    ${postInstallMarker}
+    installer.pods_project.build_configurations.each do |config|
+      config.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
+    end`;
+
+      config.modResults.contents = config.modResults.contents.replace(
+        /post_install do \|installer\|/,
+        `post_install do |installer|${postInstallSnippet}`
       );
     }
 
