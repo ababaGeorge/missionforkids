@@ -28,6 +28,7 @@ module.exports = function withModularHeaders(config) {
       'FirebaseSharedSwift',
       'FirebaseStorage',
       'RecaptchaInterop',
+      'FirebaseMessagingInterop',
     ];
 
     const podLines = pods
