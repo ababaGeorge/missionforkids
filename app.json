@@ -52,12 +52,21 @@
         "expo-build-properties",
         {
           "ios": {
-            "useFrameworks": "static"
+            "useFrameworks": "static",
+            "forceStaticLinking": [
+              "React",
+              "React-RCTAppDelegate",
+              "React-CoreModules",
+              "RNFBApp",
+              "RNFBAuth",
+              "RNFBFirestore",
+              "RNFBFunctions",
+              "RNFBStorage"
+            ]
           }
         }
       ],
-      "./plugins/withModularHeaders.js",
-      "./plugins/withFirebaseAppDelegate.js"
+      "./plugins/withModularHeaders.js"
     ],
     "extra": {
       "router": {
