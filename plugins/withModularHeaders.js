@@ -1,20 +1,44 @@
 const { withPodfile } = require('@expo/config-plugins');
 
 /**
- * 強制 Firebase iOS SDK 10.29.0（pure ObjC，無 Swift header 問題）。
+ * 1. 強制 Firebase iOS SDK 10.29.0
+ * 2. 為 Firebase Swift pods 的 ObjC 依賴啟用 modular headers
  *
- * RNFB v21 預設用 Firebase 11（Swift），但 Expo 54 的 CocoaPods 設定
- * 無法處理 Swift headers。Firebase 10.29.0 是 pure ObjC，完全不需要
- * modular headers 或 use_frameworks 等 workaround。
+ * 只列出 pod install 錯誤訊息中要求的 pods。
+ * 這些是 Firebase 的子依賴，版本由 $FirebaseSDKVersion 控制，不會衝突。
  */
 module.exports = function withModularHeaders(config) {
   return withPodfile(config, (config) => {
-    const marker = '# [withFirebaseSDK]';
-    if (!config.modResults.contents.includes(marker)) {
+    const sdkMarker = '# [withFirebaseSDK]';
+    if (!config.modResults.contents.includes(sdkMarker)) {
       config.modResults.contents =
-        `${marker}\n$FirebaseSDKVersion = '10.29.0'\n\n` +
+        `${sdkMarker}\n$FirebaseSDKVersion = '10.29.0'\n\n` +
         config.modResults.contents;
     }
+
+    // 只列出 pod install 錯誤中要求 modular headers 的 pods
+    const pods = [
+      'GoogleUtilities',
+      'FirebaseCore',
+      'FirebaseCoreExtension',
+      'FirebaseFirestoreInternal',
+      'FirebaseAppCheckInterop',
+      'FirebaseAuthInterop',
+      'FirebaseMessagingInterop',
+    ];
+
+    const podLines = pods
+      .map(p => `    pod '${p}', :modular_headers => true`)
+      .join('\n');
+
+    const podMarker = '# [withModularHeaders]';
+    if (!config.modResults.contents.includes(podMarker)) {
+      config.modResults.contents = config.modResults.contents.replace(
+        /use_react_native!\(([^)]*)\)/,
+        `use_react_native!($1)\n\n    ${podMarker}\n${podLines}`
+      );
+    }
+
     return config;
   });
 };
