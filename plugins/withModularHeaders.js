@@ -47,6 +47,14 @@ module.exports = function withModularHeaders(config) {
       target.build_configurations.each do |bc|
         bc.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
       end
+      # gRPC pods 的 C 程式碼在 framework 模式下需要寬鬆的 C 語言設定
+      if ['gRPC-Core', 'gRPC-C++', 'abseil', 'BoringSSL-GRPC'].include?(target.name)
+        target.build_configurations.each do |bc|
+          bc.build_settings["GCC_C_LANGUAGE_STANDARD"] = "gnu11"
+          bc.build_settings["CLANG_CXX_LANGUAGE_STANDARD"] = "gnu++17"
+          bc.build_settings["GCC_WARN_INHIBIT_ALL_WARNINGS"] = "YES"
+        end
+      end
     end`;
 
       config.modResults.contents = config.modResults.contents.replace(
