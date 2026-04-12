@@ -43,12 +43,13 @@ module.exports = function withModularHeaders(config) {
     if (!config.modResults.contents.includes(postMarker)) {
       const snippet = `
     ${postMarker}
-    # Fix gRPC/abseil std::result_of removal in C++17
+    # Fix gRPC/abseil std::result_of removal in C++17 — apply to ALL targets
+    installer.pods_project.build_configurations.each do |bc|
+      bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
+    end
     installer.pods_project.targets.each do |target|
-      if ['gRPC-Core', 'gRPC-C++', 'abseil', 'BoringSSL-GRPC'].include?(target.name)
-        target.build_configurations.each do |bc|
-          bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
-        end
+      target.build_configurations.each do |bc|
+        bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
       end
     end`;
 
