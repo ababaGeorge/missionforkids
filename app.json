@@ -48,8 +48,7 @@
           "photosPermission": "Allow Mission for Kids to access your photos"
         }
       ],
-      "@react-native-google-signin/google-signin",
-      [
+[
         "expo-build-properties",
         {
           "ios": {

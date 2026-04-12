@@ -14,7 +14,6 @@
     "@react-native-firebase/firestore": "^21.14.0",
     "@react-native-firebase/functions": "^21.14.0",
     "@react-native-firebase/storage": "^21.14.0",
-    "@react-native-google-signin/google-signin": "^16.1.2",
     "expo": "~54.0.33",
     "expo-apple-authentication": "~8.0.8",
     "expo-build-properties": "~1.0.10",

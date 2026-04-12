@@ -11,12 +11,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { useRouter } from 'expo-router';
 import { redeemInviteCode } from '../../lib/inviteCode';
 
-// TODO: 從 Firebase Console 取得 webClientId，目前用 placeholder
-// GoogleSignin.configure({ webClientId: 'YOUR_WEB_CLIENT_ID' });
+// TODO: Google Sign-In 待安裝 @react-native-google-signin/google-signin
+// 需要等 Firebase SDK 版本升級後才能加回（目前 Firebase 10 與 GoogleSignIn 9 不相容）
 
 export default function SignIn() {
   const { t } = useTranslation();
@@ -25,41 +24,12 @@ export default function SignIn() {
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // ========== 家長：Google Sign-In ==========
+  // ========== 家長：Google Sign-In（待安裝 google-signin）==========
   const handleGoogleSignIn = async () => {
-    try {
-      setLoading(true);
-      await GoogleSignin.hasPlayServices();
-      const response = await GoogleSignin.signIn();
-      const idToken = response.data?.idToken;
-      if (!idToken) throw new Error('No ID token');
-
-      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-      const cred = await auth().signInWithCredential(googleCredential);
-      const uid = cred.user.uid;
-
-      // 檢查是否已有 user doc
-      const userDoc = await firestore().collection('users').doc(uid).get();
-      if (!userDoc.exists) {
-        // 首次登入，建立 parent user doc
-        await firestore().collection('users').doc(uid).set({
-          displayName: cred.user.displayName || 'Parent',
-          avatarUrl: cred.user.photoURL || null,
-          authProvider: 'google',
-          authProviderId: uid,
-          roleType: 'parent',
-          birthday: null,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      router.replace('/parent/(tabs)/tasks');
-    } catch (error: any) {
-      console.error('Google sign in error:', error);
-      Alert.alert(t('common.error'), error.message);
-    } finally {
-      setLoading(false);
-    }
+    Alert.alert(
+      'Google Sign-In',
+      'Google Sign-In 尚未設定，請先用 Dev Mode 測試。'
+    );
   };
 
   // ========== 家長：Apple Sign-In（待 Apple Developer 啟用）==========
