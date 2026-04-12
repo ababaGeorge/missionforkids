@@ -42,13 +42,18 @@ module.exports = function withModularHeaders(config) {
     const postMarker = '# [withModularHeaders:post_install]';
     if (!config.modResults.contents.includes(postMarker)) {
       const snippet = `\n    ${postMarker}
-    # Fix gRPC/abseil std::result_of removal in C++17
+    # Fix gRPC/abseil C++ issues with Xcode 16+
     installer.pods_project.build_configurations.each do |bc|
       bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
     end
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
         bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
+        # Suppress Xcode 16 template keyword warning in gRPC/abseil
+        existing = bc.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
+        unless existing.include?('-Wno-missing-template-arg-list-after-template-kw')
+          bc.build_settings['OTHER_CPLUSPLUSFLAGS'] = existing + ' -Wno-missing-template-arg-list-after-template-kw'
+        end
       end
     end`;
 
