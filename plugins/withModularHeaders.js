@@ -24,7 +24,6 @@ module.exports = function withModularHeaders(config) {
       'FirebaseFirestoreInternal',
       'FirebaseSharedSwift',
       'FirebaseStorage',
-      'FirebaseStorageInternal',
       'RecaptchaInterop',
       'FirebaseMessagingInterop',
       'GTMSessionFetcher',
