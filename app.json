@@ -57,7 +57,8 @@
           }
         }
       ],
-      "./plugins/withModularHeaders.js"
+      "./plugins/withModularHeaders.js",
+      "./plugins/withFirebaseAppDelegate.js"
     ],
     "extra": {
       "router": {
