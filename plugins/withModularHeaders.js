@@ -1,10 +1,14 @@
 const { withPodfile } = require('@expo/config-plugins');
 
 /**
- * 為 Firebase Swift pods 的 ObjC 依賴啟用 modular_headers，
- * 搭配 expo-build-properties 的 useFrameworks: "static"。
+ * 修復 Firebase + React Native Firebase 的 modular header 問題。
  *
- * 參考：https://rnfirebase.io/#expo-installation
+ * 不使用 use_frameworks!（會導致 RNFB ObjC 程式碼編譯失敗）。
+ * 改用：
+ * 1. 個別 pod 的 :modular_headers => true
+ * 2. post_install 中設定 CLANG flag + HEADER_SEARCH_PATHS
+ *
+ * 參考：https://github.com/invertase/react-native-firebase/issues/8271
  */
 module.exports = function withModularHeaders(config) {
   return withPodfile(config, (config) => {
@@ -38,21 +42,19 @@ module.exports = function withModularHeaders(config) {
       );
     }
 
-    // ---- post_install CLANG flag ----
+    // ---- post_install: CLANG flag + Swift header search paths ----
     const postMarker = '# [withModularHeaders:post_install]';
     if (!config.modResults.contents.includes(postMarker)) {
       const snippet = `
     ${postMarker}
+    # Allow non-modular includes and add Swift header search paths for RNFB
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |bc|
         bc.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
-      end
-      # gRPC pods 的 C 程式碼在 framework 模式下需要寬鬆的 C 語言設定
-      if ['gRPC-Core', 'gRPC-C++', 'abseil', 'BoringSSL-GRPC'].include?(target.name)
-        target.build_configurations.each do |bc|
-          bc.build_settings["GCC_C_LANGUAGE_STANDARD"] = "gnu11"
-          bc.build_settings["CLANG_CXX_LANGUAGE_STANDARD"] = "gnu++17"
-          bc.build_settings["GCC_WARN_INHIBIT_ALL_WARNINGS"] = "YES"
+        # Add derived sources paths so RNFB can find Firebase Swift headers
+        existing = bc.build_settings["HEADER_SEARCH_PATHS"] || "$(inherited)"
+        unless existing.include?("Firebase")
+          bc.build_settings["HEADER_SEARCH_PATHS"] = existing + ' "$(PODS_ROOT)/Headers/Public" "$(PODS_ROOT)/Headers/Public/FirebaseAuth" "$(PODS_ROOT)/Headers/Public/FirebaseStorage"'
         end
       end
     end`;
