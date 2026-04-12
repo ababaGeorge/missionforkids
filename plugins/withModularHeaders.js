@@ -38,12 +38,11 @@ module.exports = function withModularHeaders(config) {
       );
     }
 
-    // ---- 3. post_install: gRPC C++14 fix ----
+    // ---- 3. post_install: gRPC C++14 fix (AFTER react_native_post_install) ----
     const postMarker = '# [withModularHeaders:post_install]';
     if (!config.modResults.contents.includes(postMarker)) {
-      const snippet = `
-    ${postMarker}
-    # Fix gRPC/abseil std::result_of removal in C++17 — apply to ALL targets
+      const snippet = `\n    ${postMarker}
+    # Fix gRPC/abseil std::result_of removal in C++17
     installer.pods_project.build_configurations.each do |bc|
       bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++14'
     end
@@ -53,9 +52,10 @@ module.exports = function withModularHeaders(config) {
       end
     end`;
 
+      // Insert AFTER react_native_post_install(...) call
       config.modResults.contents = config.modResults.contents.replace(
-        /post_install do \|installer\|/,
-        `post_install do |installer|${snippet}`
+        /(react_native_post_install\([\s\S]*?\n\s*\))/,
+        `$1${snippet}`
       );
     }
 
