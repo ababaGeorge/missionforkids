@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>MFK · Clickable Prototype</title>
+
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html, body { margin:0; padding:0; background:#09080C; color:#F7F2EA; font-family:'Noto Sans TC', system-ui, sans-serif; min-height:100vh; }
+  * { box-sizing:border-box; }
+  :root { --font-display: 'Noto Serif TC', 'Noto Sans TC', serif; }
+
+  #prototypeRoot {
+    min-height:100vh;
+    display:flex; flex-direction:column; align-items:center;
+    padding:48px 24px 80px;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 10%, rgba(255,217,102,0.06), transparent 60%),
+      radial-gradient(ellipse 80% 60% at 80% 90%, rgba(139,126,216,0.08), transparent 60%),
+      #09080C;
+  }
+  .proto-header { text-align:center; margin-bottom:36px; max-width:720px; }
+  .proto-header h1 { font-family:var(--font-display); font-weight:800; font-size:34px; margin:0 0 8px; letter-spacing:-0.5px; }
+  .proto-header p { margin:0; font-size:14px; color:#8A8D9F; line-height:1.6; }
+
+  .stage {
+    display:flex; gap:48px; align-items:flex-start; flex-wrap:wrap; justify-content:center;
+  }
+  .stage-col { display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .role-tag {
+    padding:6px 14px; border-radius:9999px;
+    font-family:var(--font-display); font-weight:800; font-size:13px;
+    background:rgba(247,242,234,0.06); border:1px solid rgba(247,242,234,0.12);
+    display:flex; align-items:center; gap:8px;
+  }
+  .role-tag .dot { width:8px; height:8px; border-radius:9999px; }
+
+  .toolbar {
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    display:flex; gap:8px; padding:8px;
+    background:rgba(18,16,24,0.88); backdrop-filter:blur(20px);
+    border:1px solid rgba(247,242,234,0.1);
+    border-radius:9999px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.5);
+    z-index:1000;
+    align-items:center;
+  }
+  .toolbar .btn {
+    padding:8px 14px; border-radius:9999px;
+    font-size:12px; font-weight:700; cursor:pointer;
+    background:transparent; color:#B8B8C0;
+    border:none; font-family:inherit;
+    transition:all 0.15s;
+  }
+  .toolbar .btn:hover { background:rgba(247,242,234,0.06); color:#F7F2EA; }
+  .toolbar .btn.primary { background:#FFD966; color:#09080C; }
+  .toolbar .btn.primary:hover { background:#FFE28A; }
+  .toolbar .btn.danger { color:#FF9A7F; }
+  .toolbar .btn.danger:hover { background:rgba(255,107,71,0.12); }
+  .toolbar .divider { width:1px; height:22px; background:rgba(247,242,234,0.12); margin:0 4px; }
+  .toolbar .label { font-size:10px; font-weight:800; letter-spacing:1.2px; color:#6B6E7F; padding:0 8px; }
+
+  .kid-switcher { display:flex; gap:4px; padding:3px; background:rgba(11,14,26,0.6); border-radius:9999px; border:1px solid rgba(247,242,234,0.06); }
+  .kid-switcher .seg { padding:6px 12px; border-radius:9999px; font-size:11px; font-weight:700; cursor:pointer; color:#8A8D9F; }
+  .kid-switcher .seg.on { background:#FFD966; color:#09080C; }
+
+  @media (max-width: 900px) {
+    .stage { gap:24px; }
+    .proto-header h1 { font-size:26px; }
+  }
+</style>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&family=Noto+Serif+TC:wght@700;800;900&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- React -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Store (plain JS) -->
+<script src="prototype_store.js"></script>
+
+<!-- Scenes (JSX) -->
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="prototype_shared.jsx"></script>
+<script type="text/babel" src="prototype_child.jsx"></script>
+<script type="text/babel" src="prototype_child2.jsx"></script>
+<script type="text/babel" src="prototype_parent.jsx"></script>
+<script type="text/babel" src="prototype_parent2.jsx"></script>
+
+</head>
+<body>
+  <div id="prototypeRoot">
+    <div class="proto-header">
+      <h1>Mission for Kids · Clickable Prototype</h1>
+      <p>兩支手機同步連動：小孩做完任務 → 家長真的收到通知 → 審核通過 → 小孩拿到星光。換個瀏覽器分頁也會即時同步。</p>
+    </div>
+    <div id="stage" class="stage"></div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="label">DEMO</div>
+    <button class="btn" id="btn-view-both">並列</button>
+    <button class="btn" id="btn-view-child">小孩</button>
+    <button class="btn" id="btn-view-parent">家長</button>
+    <div class="divider"></div>
+    <div class="label">小孩</div>
+    <div class="kid-switcher" id="kid-switcher">
+      <div class="seg on" data-kid="mei">小美</div>
+      <div class="seg" data-kid="kai">小凱</div>
+    </div>
+    <div class="divider"></div>
+    <button class="btn" id="btn-fast-deliver" title="把已確認的禮物送達">⏩ 送達</button>
+    <button class="btn danger" id="btn-reset">↺ 重置 demo</button>
+  </div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect } = React;
+
+// ===================== ROUTER / FRAME =====================
+
+function ChildFrame(){
+  const w = MFKStore.useWorld();
+  const kidId = w.currentKidId;
+  const ui = w.ui.child;
+  const goto = (screen, payload) => MFKStore.actions.goto('child', screen, payload);
+  const openModal = (modal, payload) => MFKStore.actions.openModal('child', modal, payload);
+  const closeModal = () => MFKStore.actions.closeModal('child');
+
+  // Auto-pop "wait" sheet when a task just got settled by the parent
+  // (Submitted -> approved/rejected while kid is viewing tasks home)
+  useEffect(() => {
+    if (!ui.modal && kidId) {
+      const justSettled = w.tasks.find(t =>
+        t.kidId === kidId &&
+        (t.state === 'approved' || t.state === 'rejected') &&
+        t.reviewedAt && (Date.now() - t.reviewedAt) < 5000
+      );
+      if (justSettled && ui.screen === 'tasks-home' && justSettled.id !== ui._lastSettledShown) {
+        MFKStore.actions.openModal('child', 'wait', { taskId: justSettled.id });
+        // Store a marker so we don't re-pop
+        MFKStore.actions.goto('child', ui.screen, { });
+      }
+    }
+  }, [w.tasks.map(t => t.state + t.reviewedAt).join('|')]);
+
+  // Auto-pop order progress when a pending order gets confirmed/declined
+  useEffect(() => {
+    if (!ui.modal && kidId){
+      const active = MFKStore.select.activeOrderForKid(kidId);
+      if (active && active.state === 'confirmed' && active.confirmedAt && (Date.now() - active.confirmedAt) < 5000 && ui.screen === 'rewards') {
+        MFKStore.actions.openModal('child', 'order', { orderWatchId: active.id });
+      }
+    }
+  }, [w.orders.map(o => o.state + o.confirmedAt).join('|')]);
+
+  let content;
+  switch(ui.screen){
+    case 'tasks-home':
+      content = <ChildTasksHome kidId={kidId} onOpenTask={(id)=>openModal('task-detail', { taskId: id })}/>;
+      break;
+    case 'rewards':
+      content = <ChildRewards kidId={kidId}
+        onRequestRedeem={(id)=>openModal('redeem-confirm', { orderWatchId: id })}
+        onSeeOrder={(id)=>openModal('order', { orderWatchId: id })}/>;
+      break;
+    case 'notifs':
+      content = <ChildNotifs kidId={kidId} onOpen={(n)=>{
+        if (n.kind === 'approved' || n.kind === 'rejected'){
+          openModal('wait', { taskId: n.refId });
+        } else if (n.kind === 'redeem-confirmed' || n.kind === 'redeem-declined'){
+          openModal('order', { orderWatchId: n.refId });
+        }
+      }}/>;
+      break;
+    case 'me':
+      content = <ChildMe kidId={kidId}/>;
+      break;
+    default:
+      content = <ChildTasksHome kidId={kidId} onOpenTask={(id)=>openModal('task-detail', { taskId: id })}/>;
+  }
+
+  // Modal
+  let modal = null;
+  if (ui.modal === 'task-detail'){
+    modal = <ChildTaskDetail kidId={kidId} taskId={ui.celebratingTaskId}
+      onClose={closeModal}
+      onSubmit={(id)=>{
+        MFKStore.actions.submitTask(id);
+        MFKStore.actions.openModal('child', 'wait', { taskId: id });
+      }}/>;
+  } else if (ui.modal === 'wait'){
+    modal = <ChildWait kidId={kidId} taskId={ui.celebratingTaskId}
+      onClose={closeModal}
+      onSeeResult={(next)=>{
+        if (next === 'celebrate') MFKStore.actions.openModal('child', 'celebrate', { taskId: ui.celebratingTaskId });
+      }}/>;
+  } else if (ui.modal === 'celebrate'){
+    modal = <ChildCelebrate kidId={kidId} taskId={ui.celebratingTaskId}
+      onClose={()=>{ closeModal(); goto('tasks-home'); }}/>;
+  } else if (ui.modal === 'redeem-confirm'){
+    modal = <ChildRedeemConfirm kidId={kidId} rewardId={ui.orderWatchId}
+      onClose={closeModal}
+      onConfirm={(rid)=>{
+        MFKStore.actions.requestRedeem(rid, kidId);
+        const o = MFKStore.world.orders[0];
+        MFKStore.actions.openModal('child', 'order', { orderWatchId: o.id });
+      }}/>;
+  } else if (ui.modal === 'order'){
+    modal = <ChildOrder kidId={kidId} orderId={ui.orderWatchId}
+      onClose={closeModal}
+      onDelivered={(oid)=>{ MFKStore.actions.deliverRedeem(oid); closeModal(); }}/>;
+  }
+
+  return (
+    <IOSDevice width={390} height={812} dark={true}>
+      <div style={{height:'100%', background:'#0B0E1A', color:'#F7F2EA', display:'flex', flexDirection:'column', position:'relative'}}>
+        <div style={{height:54, flexShrink:0}}/>
+        {content}
+        <PTabBar role="child" kidId={kidId} active={ui.screen} onGoto={(s)=>goto(s)}/>
+        {modal}
+      </div>
+    </IOSDevice>
+  );
+}
+
+function ParentFrame(){
+  const w = MFKStore.useWorld();
+  const ui = w.ui.parent;
+  const goto = (screen, payload) => MFKStore.actions.goto('parent', screen, payload);
+  const openModal = (modal, payload) => MFKStore.actions.openModal('parent', modal, payload);
+  const closeModal = () => MFKStore.actions.closeModal('parent');
+
+  let content;
+  switch(ui.screen){
+    case 'tasks-manage':
+      content = <ParentTasksManage
+        onToggleTaskPaused={(id)=>MFKStore.actions.toggleTaskPaused(id)}
+        onNewTask={()=>MFKStore.actions.addTask({ zh:'新任務', emoji:'✨', points:10, kidId:'mei', freq:'daily' })}
+      />;
+      break;
+    case 'review':
+      content = <ParentReviewList onOpenReview={(opt)=>{
+        if (opt.kind === 'task') openModal('review-task', { reviewingTaskId: opt.taskId });
+        else openModal('redeem-confirm', { orderConfirmId: opt.orderId });
+      }}/>;
+      break;
+    case 'rewards-p':
+      content = <ParentRewardsTab onEdit={()=>openModal('reward-edit')}/>;
+      break;
+    case 'notifs':
+      content = <ParentNotifs/>;
+      break;
+    case 'settings':
+      content = <ParentSettings/>;
+      break;
+    default:
+      content = <ParentTasksManage onToggleTaskPaused={(id)=>MFKStore.actions.toggleTaskPaused(id)} onNewTask={()=>{}}/>;
+  }
+
+  let modal = null;
+  if (ui.modal === 'review-task'){
+    modal = <ParentReviewSheet taskId={ui.reviewingTaskId}
+      onClose={closeModal}
+      onApprove={(id, note)=>{ MFKStore.actions.approveTask(id, note); closeModal(); goto('review'); }}
+      onReject={(id, note)=>{ MFKStore.actions.rejectTask(id, note); closeModal(); goto('review'); }}
+    />;
+  } else if (ui.modal === 'redeem-confirm'){
+    modal = <ParentRedeemConfirm orderId={ui.orderConfirmId}
+      onClose={closeModal}
+      onConfirm={(oid,note)=>{ MFKStore.actions.confirmRedeem(oid, note); closeModal(); goto('review'); }}
+      onDecline={(oid,note)=>{ MFKStore.actions.declineRedeem(oid, note); closeModal(); goto('review'); }}
+    />;
+  } else if (ui.modal === 'reward-edit'){
+    modal = <ParentRewardEdit onClose={closeModal}/>;
+  }
+
+  return (
+    <IOSDevice width={390} height={812} dark={true}>
+      <div style={{height:'100%', background:'#0B0E1A', color:'#F7F2EA', display:'flex', flexDirection:'column', position:'relative'}}>
+        <div style={{height:54, flexShrink:0}}/>
+        {content}
+        <PTabBar role="parent" active={ui.screen} onGoto={(s)=>goto(s)}/>
+        {modal}
+      </div>
+    </IOSDevice>
+  );
+}
+
+// ===================== STAGE =====================
+
+function Stage(){
+  const [view, setView] = useState(localStorage.getItem('mfk_view') || 'both');
+  useEffect(()=>{ localStorage.setItem('mfk_view', view); },[view]);
+
+  useEffect(()=>{
+    // Wire toolbar buttons
+    const $ = (id) => document.getElementById(id);
+    const setActive = (id) => {
+      ['btn-view-both','btn-view-child','btn-view-parent'].forEach(k => $(k)?.classList.remove('primary'));
+      $(id)?.classList.add('primary');
+    };
+    const refresh = () => {
+      setActive(view==='both'?'btn-view-both':view==='child'?'btn-view-child':'btn-view-parent');
+    };
+    refresh();
+    $('btn-view-both').onclick = () => setView('both');
+    $('btn-view-child').onclick = () => setView('child');
+    $('btn-view-parent').onclick = () => setView('parent');
+    $('btn-reset').onclick = () => { if (confirm('確定要重置 demo？')) MFKStore.actions.reset(); };
+    $('btn-fast-deliver').onclick = () => MFKStore.actions.fastForwardDelivery();
+    // Kid switcher
+    document.querySelectorAll('#kid-switcher .seg').forEach(el => {
+      el.onclick = () => {
+        const kid = el.dataset.kid;
+        MFKStore.actions.switchKid(kid);
+        document.querySelectorAll('#kid-switcher .seg').forEach(s => s.classList.toggle('on', s.dataset.kid === kid));
+      };
+    });
+    // subscribe to world so kid switcher reflects state
+    const unsub = MFKStore.subscribe((world)=>{
+      document.querySelectorAll('#kid-switcher .seg').forEach(s =>
+        s.classList.toggle('on', s.dataset.kid === world.currentKidId)
+      );
+    });
+    return unsub;
+  }, [view]);
+
+  return (
+    <>
+      {(view==='both' || view==='child') && (
+        <div className="stage-col">
+          <div className="role-tag"><span className="dot" style={{background:'#FFD966'}}/> 小孩 · {MFKStore.select.currentKid().zh}</div>
+          <ChildFrame/>
+        </div>
+      )}
+      {(view==='both' || view==='parent') && (
+        <div className="stage-col">
+          <div className="role-tag"><span className="dot" style={{background:'#5EE0A8'}}/> 家長</div>
+          <ParentFrame/>
+        </div>
+      )}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('stage')).render(<Stage/>);
+</script>
+</body>
+</html>

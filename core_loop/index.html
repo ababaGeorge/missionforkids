@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mission for Kids — Core Loop Directions</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #EEE6D4; font-family: var(--font-body); color: var(--text); }
+  body { min-height: 100vh; padding: 28px 24px 120px; }
+  .page-head {
+    max-width: 1400px; margin: 0 auto 24px; display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap;
+  }
+  .page-head h1 { font-family: var(--font-display); font-weight: 800; font-size: 28px; letter-spacing: -0.01em; margin: 0; }
+  .page-head .sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; color: var(--primary-dark); background: var(--primary-light); padding: 6px 10px; border-radius: 9999px; }
+
+  .frames {
+    max-width: 1400px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); gap: 36px 28px;
+  }
+  .frame-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .frame-label { font-size: 12px; font-weight: 800; letter-spacing: 1.4px; color: var(--text-muted); text-transform: uppercase; }
+  .frame-step { font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: 14px; color: var(--primary); }
+
+  /* Tweaks panel */
+  .tweaks {
+    position: fixed; bottom: 20px; right: 20px; width: 280px;
+    background: #fff; border-radius: 16px; box-shadow: 0 20px 48px rgba(28,26,20,0.18), 0 0 0 1px var(--border);
+    padding: 16px; z-index: 1000; display: none;
+    font-family: var(--font-body);
+  }
+  .tweaks.on { display: block; }
+  .tweaks h3 { margin: 0 0 4px; font-family: var(--font-display); font-weight: 800; font-size: 16px; }
+  .tweaks .hint { font-size: 11px; color: var(--text-muted); margin-bottom: 12px; }
+  .tweaks .row { margin-bottom: 14px; }
+  .tweaks .row:last-child { margin-bottom: 0; }
+  .tweaks label { font-size: 10px; font-weight: 800; letter-spacing: 1.2px; color: var(--text-muted); display: block; margin-bottom: 6px; }
+  .seg { display: flex; gap: 4px; background: #F0EADB; padding: 3px; border-radius: 10px; }
+  .seg button { flex: 1; border: 0; background: transparent; font-family: var(--font-body); font-weight: 700; font-size: 12px; padding: 7px 4px; border-radius: 8px; cursor: pointer; color: var(--text-muted); }
+  .seg button.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <h1>Core Loop · A / B / C</h1>
+    <div class="sub">Three directions, 10 screens each. Toggle <b>Tweaks</b> (top bar) to switch direction, role, load, motion, language.</div>
+  </div>
+  <div class="badge">📱 iPhone · 390 × 780</div>
+</div>
+
+<div id="root"></div>
+
+<div class="tweaks" id="tweaks">
+  <h3>Tweaks</h3>
+  <div class="hint">Explore the same flow across 3 visual systems.</div>
+  <div class="row"><label>Direction</label><div class="seg" data-key="direction"><button data-val="A">A · Flat</button><button data-val="B">B · Editorial</button><button data-val="C">C · Night</button></div></div>
+  <div class="row"><label>Role</label><div class="seg" data-key="role"><button data-val="child">Child</button><button data-val="parent">Parent</button></div></div>
+  <div class="row"><label>Load</label><div class="seg" data-key="load"><button data-val="full">Busy day</button><button data-val="light">Easy day</button></div></div>
+  <div class="row"><label>Motion</label><div class="seg" data-key="motion"><button data-val="on">On</button><button data-val="reduce">Reduce</button></div></div>
+  <div class="row"><label>Language</label><div class="seg" data-key="lang"><button data-val="zh">中文</button><button data-val="en">English</button></div></div>
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data.js"></script>
+<script type="text/babel" src="shared.jsx"></script>
+<script type="text/babel" src="screens_a.jsx"></script>
+<script type="text/babel" src="screens_b.jsx"></script>
+<script type="text/babel" src="screens_c.jsx"></script>
+<script type="text/babel" src="screens_c2.jsx"></script>
+
+<script>
+/* --- Tweak defaults (persisted by host) --- */
+window.__TWEAKS = /*EDITMODE-BEGIN*/{
+  "direction": "C",
+  "role": "parent",
+  "load": "full",
+  "motion": "on",
+  "lang": "zh"
+}/*EDITMODE-END*/;
+</script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const CHILD_STEPS = [
+  { key: 'tasksHome',   label_zh: '任務首頁',   label_en: 'Tasks tab',    role: 'child' },
+  { key: 'detail',      label_zh: '任務細節',   label_en: 'Task detail',  role: 'child' },
+  { key: 'camera',      label_zh: '拍照',       label_en: 'Camera',       role: 'child' },
+  { key: 'ai',          label_zh: '星光傳送',   label_en: 'Send',         role: 'child' },
+  { key: 'pending',     label_zh: '等待',       label_en: 'Pending',      role: 'child' },
+  { key: 'celebrate',   label_zh: '慶祝',       label_en: 'Celebration',  role: 'child' },
+  { key: 'childRewards',label_zh: '獎勵 tab',   label_en: 'Rewards tab',  role: 'child' },
+  { key: 'order',       label_zh: '訂單進度',   label_en: 'Order',        role: 'child' },
+  { key: 'childMe',     label_zh: '我的 tab',   label_en: 'Me tab',       role: 'child' },
+  { key: 'childNotif',  label_zh: '通知 tab',   label_en: 'Alerts tab',   role: 'child' },
+];
+const PARENT_STEPS = [
+  { key: 'parentTasks',   label_zh: '任務管理',   label_en: 'Tasks tab',     role: 'parent' },
+  { key: 'assign',        label_zh: '派任務 sheet', label_en: 'Assign sheet',  role: 'parent' },
+  { key: 'keyboard',      label_zh: '鍵盤檢查',   label_en: 'Keyboard demo', role: 'parent' },
+  { key: 'review',        label_zh: '審核',       label_en: 'Review',        role: 'parent' },
+  { key: 'redeemConfirm', label_zh: '兌換確認',   label_en: 'Redeem',        role: 'parent' },
+  { key: 'parentRewards', label_zh: '禮物 tab',   label_en: 'Rewards tab',   role: 'parent' },
+  { key: 'rewardEdit',    label_zh: '新增禮物',   label_en: 'New reward',    role: 'parent' },
+  { key: 'history',       label_zh: '任務歷程',   label_en: 'History',       role: 'parent' },
+  { key: 'settings',      label_zh: '設定',       label_en: 'Settings',      role: 'parent' },
+];
+
+function renderScreen(dir, key, props) {
+  const prefix = dir; // 'A' | 'B' | 'C'
+  const map = {
+    tasksHome:     `C_TasksHome`,
+    detail:        `${prefix}_TaskDetail`,
+    camera:        `${prefix}_Camera`,
+    ai:            `${prefix}_AIReview`,
+    pending:       `${prefix}_Pending`,
+    celebrate:     `${prefix}_Celebration`,
+    childRewards:  `C_ChildRewardsTab`,
+    childMe:       `C_ChildMe`,
+    childNotif:    `C_ChildNotif`,
+    order:         `${prefix}_Order`,
+    parentTasks:   `C_ParentTasksManage`,
+    assign:        `${prefix}_ParentAssign`,
+    keyboard:      `C_KeyboardDemo`,
+    review:        `${prefix}_ParentReview`,
+    redeemConfirm: `${prefix}_ParentRedeemConfirm`,
+    parentRewards: `C_ParentRewardsTab`,
+    rewardEdit:    `C_ParentRewardEdit`,
+    history:       `${prefix}_ParentHistory`,
+    settings:      `${prefix}_ParentSettings`,
+  };
+  // Fall back to C for parent screens not built in A/B yet.
+  const Cmp = window[map[key]] || window[`C_${map[key].slice(2)}`];
+  if (!Cmp) return <div style={{padding: 40, color: '#999', fontSize: 12}}>Missing: {map[key]}</div>;
+  return <Cmp {...props} />;
+}
+
+function App() {
+  const [t, setT] = useState(window.__TWEAKS);
+
+  // Tweaks integration
+  useEffect(() => {
+    const onMsg = (ev) => {
+      const d = ev.data || {};
+      if (d.type === '__activate_edit_mode') document.getElementById('tweaks').classList.add('on');
+      if (d.type === '__deactivate_edit_mode') document.getElementById('tweaks').classList.remove('on');
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  useEffect(() => {
+    document.querySelectorAll('.seg').forEach(seg => {
+      const key = seg.dataset.key;
+      seg.querySelectorAll('button').forEach(b => {
+        b.classList.toggle('active', b.dataset.val === t[key]);
+        b.onclick = () => {
+          const next = { ...t, [key]: b.dataset.val };
+          setT(next);
+          window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: b.dataset.val } }, '*');
+        };
+      });
+    });
+  }, [t]);
+
+  const steps = t.role === 'parent' ? PARENT_STEPS : CHILD_STEPS;
+  const kid = window.MFK_DATA.family.kids[0];
+  const labelFor = (s, i) => {
+    const n = String(i+1).padStart(2, '0');
+    return `${n} · ${t.lang==='en' ? s.label_en : s.label_zh}`;
+  };
+
+  return (
+    <div className="frames">
+      {steps.map((s, i) => (
+        <div key={s.key} className="frame-wrap" data-screen-label={labelFor(s, i)}>
+          <Phone label={labelFor(s, i)}>
+            {renderScreen(t.direction, s.key, { lang: t.lang, load: t.load, motion: t.motion, kid, role: t.role })}
+          </Phone>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
