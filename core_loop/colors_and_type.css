@@ -1,0 +1,206 @@
+/* Mission for Kids — Design Tokens
+ * Source of truth: mfk-claude-design-input/DESIGN.md
+ * Use these variables in UI kits, slides, and any MFK-branded output.
+ */
+
+/* ---- Webfonts (Google Fonts CDN) ----
+ * In production (Expo), the app uses expo-google-fonts:
+ *   @expo-google-fonts/nunito, /noto-sans-tc, /dm-sans
+ * For web previews we import from Google Fonts directly.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap');
+
+:root {
+  /* ==== Color — base palette ==== */
+  --bg:            #F7F2EA;  /* app background — warm parchment cream */
+  --surface:       #FFFDF7;  /* cards, modals — cream white */
+
+  --primary:       #1A8A7A;  /* deep teal — buttons, links, borders */
+  --primary-light: #E0F5F0;  /* badge bg, highlights */
+  --primary-dark:  #146B5E;  /* pressed / shadow */
+
+  --accent:        #F5A623;  /* beeswax amber — stars, rewards */
+  --accent-light:  #FFF3D6;  /* star badges, reward card highlights */
+
+  --text:          #1C1A14;  /* inkwell black — never pure #000 */
+  --text-muted:    #8A8275;  /* secondary, metadata, placeholders */
+
+  --success:       #3D8B4E;  /* fern green — approvals */
+  --success-light: #E3F1E6;
+  --warning:       #E88A0A;  /* amber orange — AI uncertain */
+  --warning-light: #FCEBCD;
+  --error:         #C0392B;  /* warm red — rejection */
+  --error-light:   #F7DCD7;
+  --info:          #2E86C1;  /* calm blue — AI reviewing */
+  --info-light:    #D8EAF4;
+
+  --border:        #D8D2C4;  /* warm gray — dividers */
+  --border-strong: #B8AF9B;
+
+  /* ==== Shadow (warm, cooled-black with alpha) ==== */
+  --shadow-sm: 0 1px 3px rgba(28, 26, 20, 0.06);
+  --shadow-md: 0 4px 12px rgba(28, 26, 20, 0.08);
+  --shadow-lg: 0 8px 24px rgba(28, 26, 20, 0.10);
+
+  --overlay:         rgba(28, 26, 20, 0.40);
+  --overlay-photo:   rgba(0, 0, 0, 0.90);
+
+  /* ==== Radius ==== */
+  --radius-sm:   6px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-full: 9999px;
+
+  /* ==== Spacing (8px base) ==== */
+  --space-2xs: 2px;
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  16px;
+  --space-lg:  24px;
+  --space-xl:  32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  /* ==== Type — families ==== */
+  --font-display: 'Nunito', 'Noto Sans TC', ui-rounded, system-ui, sans-serif;
+  --font-body:    'Nunito', 'Noto Sans TC', ui-rounded, system-ui, sans-serif;
+  --font-data:    'DM Sans', 'Nunito', ui-monospace, monospace;
+
+  /* ==== Type — base sizes ==== */
+  --text-3xl: 40px;   /* hero numbers, celebration */
+  --text-2xl: 32px;   /* screen titles, hero task name */
+  --text-xl:  24px;   /* section headers, child task titles */
+  --text-lg:  20px;   /* child body large, parent section headers */
+  --text-md:  16px;   /* child body (min), parent body */
+  --text-sm:  14px;   /* parent body, labels, metadata */
+  --text-xs:  12px;   /* badges, captions, timestamps */
+
+  /* ==== Type — semantic ==== */
+  --h1-font:        var(--font-display);
+  --h1-size:        var(--text-2xl);
+  --h1-weight:      800;
+  --h1-line:        1.15;
+  --h1-letter:      -0.01em;
+
+  --h2-font:        var(--font-display);
+  --h2-size:        var(--text-xl);
+  --h2-weight:      800;
+  --h2-line:        1.2;
+  --h2-letter:      -0.005em;
+
+  --h3-font:        var(--font-display);
+  --h3-size:        var(--text-lg);
+  --h3-weight:      700;
+  --h3-line:        1.25;
+
+  --body-font:      var(--font-body);
+  --body-size:      var(--text-md);
+  --body-weight:    500;
+  --body-line:      1.5;
+
+  --body-sm-size:   var(--text-sm);
+  --body-sm-weight: 500;
+
+  --label-size:     var(--text-sm);
+  --label-weight:   700;
+  --label-line:     1.4;
+
+  --hero-num-font:   var(--font-display);
+  --hero-num-size:   var(--text-3xl);
+  --hero-num-weight: 800;
+
+  --data-font:       var(--font-data);
+  --data-size:       var(--text-md);
+  --data-weight:     500;
+  --data-variant:    tabular-nums;
+
+  /* ==== Motion ==== */
+  --ease-enter: cubic-bezier(0.0, 0.0, 0.2, 1);    /* ease-out */
+  --ease-exit:  cubic-bezier(0.4, 0.0, 1.0, 1);    /* ease-in */
+  --ease-move:  cubic-bezier(0.4, 0.0, 0.2, 1);    /* ease-in-out */
+  --dur-micro:  100ms;
+  --dur-short:  200ms;
+  --dur-medium: 300ms;
+  --dur-long:   550ms;
+
+  /* ==== Touch targets ==== */
+  --touch-child: 48px;
+  --touch-parent: 44px;
+  --touch-cta: 56px;
+}
+
+/* Dark mode — reduce saturation 10–20%, darken surfaces */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:            #1A1814;
+    --surface:       #252219;
+    --primary:       #2BB8A4;
+    --primary-light: #1F3A35;
+    --primary-dark:  #1A8A7A;
+    --accent:        #F5A623;
+    --accent-light:  #3F3420;
+    --text:          #E8E4DC;
+    --text-muted:    #8A8275;
+    --border:        #3A3528;
+    --border-strong: #4D4633;
+  }
+}
+
+/* ==== Resets and base type ==== */
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body-font);
+  font-size: var(--body-size);
+  font-weight: var(--body-weight);
+  line-height: var(--body-line);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font-family: var(--h1-font);
+  font-size: var(--h1-size);
+  font-weight: var(--h1-weight);
+  line-height: var(--h1-line);
+  letter-spacing: var(--h1-letter);
+  color: var(--text);
+  margin: 0;
+}
+h2, .h2 {
+  font-family: var(--h2-font);
+  font-size: var(--h2-size);
+  font-weight: var(--h2-weight);
+  line-height: var(--h2-line);
+  letter-spacing: var(--h2-letter);
+  color: var(--text);
+  margin: 0;
+}
+h3, .h3 {
+  font-family: var(--h3-font);
+  font-size: var(--h3-size);
+  font-weight: var(--h3-weight);
+  line-height: var(--h3-line);
+  color: var(--text);
+  margin: 0;
+}
+p, .body {
+  font-family: var(--body-font);
+  font-size: var(--body-size);
+  font-weight: var(--body-weight);
+  line-height: var(--body-line);
+  margin: 0;
+}
+.body-sm { font-size: var(--body-sm-size); font-weight: var(--body-sm-weight); line-height: var(--body-line); }
+.label   { font-size: var(--label-size); font-weight: var(--label-weight); line-height: var(--label-line); text-transform: none; }
+.hero-num { font-family: var(--hero-num-font); font-size: var(--hero-num-size); font-weight: var(--hero-num-weight); line-height: 1; letter-spacing: -0.02em; }
+.data {
+  font-family: var(--data-font);
+  font-size: var(--data-size);
+  font-weight: var(--data-weight);
+  font-variant-numeric: tabular-nums;
+}
+.muted  { color: var(--text-muted); }
+.star   { color: var(--accent); font-family: var(--font-display); font-weight: 800; }
