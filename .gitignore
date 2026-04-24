@@ -42,3 +42,4 @@ functions/lib/
 # generated native folders
 /ios
 /android
+.claude/skills/gstack/

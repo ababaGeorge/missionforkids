@@ -1,0 +1,1 @@
+/Users/ababa_george/conductor/workspaces/missionforkids/manado/.claude/skills/gstack/plan-ceo-review/SKILL.md
