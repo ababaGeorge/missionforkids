@@ -10,13 +10,22 @@
     "back": "Back",
     "done": "Done",
     "points": "pts",
-    "photo": "Photo"
+    "photo": "Photo",
+    "signOut": "Sign Out",
+    "signOutConfirm": "Are you sure you want to sign out?",
+    "all": "All",
+    "or": "or",
+    "today": "Today"
   },
   "auth": {
     "signInWithApple": "Sign in with Apple",
     "signInWithGoogle": "Sign in with Google",
     "signOut": "Sign Out",
-    "welcome": "Welcome to Mission for Kids"
+    "welcome": "Welcome to Mission for Kids",
+    "parentSignIn": "Parent Sign In",
+    "childJoin": "Child Join",
+    "enterInviteCode": "Enter Invite Code",
+    "join": "Join"
   },
   "family": {
     "createFamily": "Create Family",
@@ -25,13 +34,23 @@
     "addChild": "Add Child",
     "members": "Family Members",
     "childName": "Child's Name",
-    "birthday": "Birthday"
+    "birthday": "Birthday",
+    "inviteCode": "Invite Code",
+    "inviteCodeHint": "Enter this code on child's device (valid for 24 hours)",
+    "inviteCodes": "Invite Codes",
+    "codeUsed": "Used",
+    "codeExpired": "Expired",
+    "codeActive": "Active",
+    "regenerateCode": "Regenerate Code",
+    "inviteParent": "Invite Parent",
+    "noInviteCodes": "No invite codes yet"
   },
   "tasks": {
     "title": "Tasks",
     "createTask": "Create Task",
     "taskName": "Task Name",
     "assignTo": "Assign To",
+    "assignAll": "Assign to All",
     "dueDate": "Due Date",
     "pointsReward": "Points Reward",
     "submitPhoto": "Take Photo to Submit",
@@ -40,11 +59,37 @@
     "rejected": "Not Approved",
     "tryAgain": "Try again!",
     "uploadFailed": "Photo upload failed, check your connection",
-    "noTasks": "No tasks yet",
+    "noTasks": "No missions yet. Ask Mom/Dad!",
+    "noTasksParent": "No tasks yet. Create the first mission!",
     "completed": "Completed",
     "reviewMode": "Review Mode",
     "manual": "Manual Review",
-    "semiAuto": "Semi-Auto"
+    "semiAuto": "Semi-Auto",
+    "pending": "To Do",
+    "cameraPermission": "Camera permission is needed",
+    "maxSubmissions": "Maximum submissions reached",
+    "attempts": "attempts",
+    "templates": "Templates",
+    "useTemplate": "Use Template",
+    "customTask": "Custom Task",
+    "deleteTask": "Delete Task",
+    "deleteTaskConfirm": "This will remove the task. Are you sure?",
+    "archived": "Archived",
+    "frequency": "Frequency",
+    "freqOnce": "Once",
+    "freqDaily": "Daily",
+    "freqWeekly": "Weekly",
+    "freqMonthly": "Monthly",
+    "dueDaysUnit": " days",
+    "gracePeriod": "Grace Period",
+    "overdue": "Overdue",
+    "dueToday": "Due today",
+    "dueTomorrow": "Due tomorrow",
+    "noTasksToday": "No missions today",
+    "haveFun": "Have a great day!",
+    "nextMission": "Next mission",
+    "otherMissions": "Today's other missions",
+    "earned": "earned"
   },
   "points": {
     "balance": "Point Balance",
@@ -52,12 +97,14 @@
     "earned": "Earned",
     "spent": "Spent",
     "grantPoints": "Grant Points",
-    "grantReason": "Reason"
+    "grantReason": "Reason",
+    "noTransactions": "No transactions yet"
   },
   "rewards": {
     "store": "Reward Store",
     "createItem": "Add Item",
     "redeem": "Redeem",
+    "redeemConfirm": "Spend {{cost}} points to redeem \"{{name}}\"?",
     "itemName": "Item Name",
     "pointCost": "Point Cost",
     "physical": "Physical Reward",
@@ -67,12 +114,17 @@
     "markDelivered": "Mark Delivered",
     "confirmReceived": "Confirm Received",
     "cancelOrder": "Cancel Order",
+    "cancelOrderConfirm": "Are you sure you want to cancel this order?",
     "orderApproved": "Approved",
     "orderDelivered": "Delivered",
     "orderCompleted": "Completed",
     "orderCancelled": "Cancelled",
     "orderRejected": "Rejected",
-    "notEnoughPoints": "Not enough points"
+    "orderPending": "Pending",
+    "notEnoughPoints": "Not enough points",
+    "noOrders": "No orders yet",
+    "noItems": "No reward items yet",
+    "rejectOrder": "Reject Order"
   },
   "ai": {
     "title": "AI Playground",
@@ -89,6 +141,6 @@
     "approve": "Approve",
     "reject": "Reject",
     "addNote": "Add note (optional)",
-    "noReviews": "No pending reviews"
+    "noReviews": "All caught up! No pending reviews."
   }
 }

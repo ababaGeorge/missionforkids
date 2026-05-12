@@ -81,6 +81,7 @@ export interface Task {
   frequency: TaskFrequency;
   startDate: Timestamp;
   dueDate: Timestamp;
+  graceDays: number;
   reviewMode: TaskReviewMode;
   assigneeType: TaskAssigneeType;
   assigneeUserId: string | null;
@@ -109,6 +110,7 @@ export interface TaskInstance {
   reviewedBy: string | null;
   reviewedAt: Timestamp | null;
   pointsAwarded: number | null;
+  parentNote?: string | null;
 }
 
 export type AiResult = 'pass' | 'fail' | 'uncertain';
@@ -119,6 +121,7 @@ export interface TaskSubmission {
   familyId: string;
   submittedBy: string;
   photoUrls: string[];
+  childNote: string | null;
   aiResult: AiResult | null;
   aiConfidence: number | null;
   submittedAt: Timestamp;
@@ -138,6 +141,7 @@ export interface RewardItem {
   description: string | null;
   pointCost: number;
   itemType: RewardItemType;
+  emoji: string | null;
   imageUrl: string | null;
   status: RewardItemStatus;
   createdBy: string;

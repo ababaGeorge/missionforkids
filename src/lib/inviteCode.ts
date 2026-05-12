@@ -26,6 +26,31 @@ export async function createInviteCode(
   await firestore().collection('inviteCodes').doc(code).set({
     childUserId,
     familyId,
+    role: 'child',
+    expiresAt: firestore.Timestamp.fromDate(expiresAt),
+    used: false,
+  });
+
+  return code;
+}
+
+/**
+ * 為家長建立邀請碼，24 小時後過期
+ * 家長用正式帳號（Google/Apple）登入後兌換
+ */
+export async function createParentInviteCode(
+  familyId: string,
+  invitedBy: string
+): Promise<string> {
+  const code = generateCode();
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 24);
+
+  await firestore().collection('inviteCodes').doc(code).set({
+    childUserId: null,
+    familyId,
+    role: 'parent',
+    invitedBy,
     expiresAt: firestore.Timestamp.fromDate(expiresAt),
     used: false,
   });
@@ -41,7 +66,8 @@ export interface InviteCodeData {
 /**
  * 驗證並兌換邀請碼
  * - 檢查碼是否存在、未使用、未過期
- * - 將 authUid 寫入 child user doc 的 authProviderId
+ * - 孩子碼：將 authUid 寫入 child user doc 的 authProviderId
+ * - 家長碼：將 authUid 加入家庭成員
  * - 標記碼為已使用
  */
 export async function redeemInviteCode(
@@ -67,16 +93,28 @@ export async function redeemInviteCode(
     throw new Error('CODE_EXPIRED');
   }
 
-  // 將 auth UID 寫入 child user doc
-  await firestore().collection('users').doc(data.childUserId).update({
-    authProviderId: authUid,
-  });
+  if (data.role === 'parent') {
+    // 家長碼：建立 membership，不建立 user doc（家長自己有帳號）
+    await firestore().collection('familyMemberships').doc(`${authUid}_${data.familyId}`).set({
+      familyId: data.familyId,
+      userId: authUid,
+      role: 'parent',
+      status: 'active',
+      invitedBy: data.invitedBy || null,
+      joinedAt: firestore.FieldValue.serverTimestamp(),
+    });
+  } else {
+    // 孩子碼：將 auth UID 寫入 child user doc
+    await firestore().collection('users').doc(data.childUserId).update({
+      authProviderId: authUid,
+    });
+  }
 
   // 標記碼為已使用
   await codeDoc.ref.update({ used: true });
 
   return {
-    childUserId: data.childUserId,
+    childUserId: data.childUserId || authUid,
     familyId: data.familyId,
   };
 }

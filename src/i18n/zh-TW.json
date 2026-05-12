@@ -10,13 +10,22 @@
     "back": "返回",
     "done": "完成",
     "points": "點",
-    "photo": "照片"
+    "photo": "照片",
+    "signOut": "登出",
+    "signOutConfirm": "確定要登出嗎？",
+    "all": "全部",
+    "or": "或",
+    "today": "今天"
   },
   "auth": {
     "signInWithApple": "使用 Apple 登入",
     "signInWithGoogle": "使用 Google 登入",
     "signOut": "登出",
-    "welcome": "歡迎來到任務獎勵"
+    "welcome": "歡迎來到任務獎勵",
+    "parentSignIn": "家長登入",
+    "childJoin": "孩子加入",
+    "enterInviteCode": "輸入邀請碼",
+    "join": "加入"
   },
   "family": {
     "createFamily": "建立家庭",
@@ -25,13 +34,23 @@
     "addChild": "新增孩子",
     "members": "家庭成員",
     "childName": "孩子名稱",
-    "birthday": "生日"
+    "birthday": "生日",
+    "inviteCode": "邀請碼",
+    "inviteCodeHint": "請在孩子的裝置上輸入此邀請碼（24 小時內有效）",
+    "inviteCodes": "邀請碼管理",
+    "codeUsed": "已使用",
+    "codeExpired": "已過期",
+    "codeActive": "有效",
+    "regenerateCode": "重新產生",
+    "inviteParent": "邀請家長",
+    "noInviteCodes": "還沒有邀請碼"
   },
   "tasks": {
     "title": "任務",
     "createTask": "建立任務",
     "taskName": "任務名稱",
     "assignTo": "指派給",
+    "assignAll": "指派給全部",
     "dueDate": "截止日期",
     "pointsReward": "完成點數",
     "submitPhoto": "拍照提交",
@@ -40,11 +59,37 @@
     "rejected": "未通過",
     "tryAgain": "再試一次！",
     "uploadFailed": "無法上傳照片，請檢查網路",
-    "noTasks": "目前沒有任務",
+    "noTasks": "還沒有任務，叫爸媽設定吧！",
+    "noTasksParent": "還沒有任務，建立第一個任務吧！",
     "completed": "已完成",
     "reviewMode": "審核模式",
     "manual": "人工審核",
-    "semiAuto": "半自動"
+    "semiAuto": "半自動",
+    "pending": "待完成",
+    "cameraPermission": "請允許使用相機",
+    "maxSubmissions": "已達提交上限",
+    "attempts": "次提交",
+    "templates": "範本",
+    "useTemplate": "使用範本",
+    "customTask": "自訂任務",
+    "deleteTask": "刪除任務",
+    "deleteTaskConfirm": "確定要刪除這個任務嗎？",
+    "archived": "已封存",
+    "frequency": "頻率",
+    "freqOnce": "單次",
+    "freqDaily": "每天",
+    "freqWeekly": "每週",
+    "freqMonthly": "每月",
+    "dueDaysUnit": "天",
+    "gracePeriod": "補交期",
+    "overdue": "已逾期",
+    "dueToday": "今天截止",
+    "dueTomorrow": "明天截止",
+    "noTasksToday": "今天沒任務了",
+    "haveFun": "好好玩吧！",
+    "nextMission": "下一個任務",
+    "otherMissions": "今天的其他任務",
+    "earned": "已獲得"
   },
   "points": {
     "balance": "點數餘額",
@@ -52,12 +97,14 @@
     "earned": "獲得",
     "spent": "花費",
     "grantPoints": "直接給點",
-    "grantReason": "給點名目"
+    "grantReason": "給點名目",
+    "noTransactions": "還沒有交易紀錄"
   },
   "rewards": {
     "store": "獎勵商店",
     "createItem": "新增商品",
     "redeem": "兌換",
+    "redeemConfirm": "花 {{cost}} 點兌換「{{name}}」？",
     "itemName": "商品名稱",
     "pointCost": "所需點數",
     "physical": "實體獎勵",
@@ -67,12 +114,17 @@
     "markDelivered": "標記已交付",
     "confirmReceived": "確認收到",
     "cancelOrder": "取消訂單",
+    "cancelOrderConfirm": "確定要取消這筆訂單嗎？",
     "orderApproved": "訂單已核准",
     "orderDelivered": "已交付",
     "orderCompleted": "已完成",
     "orderCancelled": "已取消",
     "orderRejected": "已拒絕",
-    "notEnoughPoints": "點數不足"
+    "orderPending": "待核准",
+    "notEnoughPoints": "點數不足",
+    "noOrders": "還沒有訂單",
+    "noItems": "還沒有獎勵商品",
+    "rejectOrder": "拒絕訂單"
   },
   "ai": {
     "title": "AI 實驗室",
@@ -89,6 +141,6 @@
     "approve": "通過",
     "reject": "退回",
     "addNote": "新增備註（選填）",
-    "noReviews": "目前沒有待審核項目"
+    "noReviews": "全部審完了！沒有待處理項目。"
   }
 }

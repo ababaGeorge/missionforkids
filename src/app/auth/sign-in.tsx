@@ -1,21 +1,26 @@
 import { useState } from 'react';
 import {
   View,
-  Text,
-  TouchableOpacity,
   StyleSheet,
   TextInput,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  ScrollView,
+  Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
+  Pressable,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { redeemInviteCode } from '../../lib/inviteCode';
-
-// TODO: Google Sign-In 待安裝 @react-native-google-signin/google-signin
-// 需要等 Firebase SDK 版本升級後才能加回（目前 Firebase 10 與 GoogleSignIn 9 不相容）
+import { P, spacing, radius, shadow } from '../../design/tokens';
+import { Starfield } from '../../design/Starfield';
+import { Display, BodySm, Label, AppText } from '../../design/Text';
 
 export default function SignIn() {
   const { t } = useTranslation();
@@ -24,7 +29,6 @@ export default function SignIn() {
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // ========== 家長：Google Sign-In（待安裝 google-signin）==========
   const handleGoogleSignIn = async () => {
     Alert.alert(
       'Google Sign-In',
@@ -32,7 +36,6 @@ export default function SignIn() {
     );
   };
 
-  // ========== 家長：Apple Sign-In（待 Apple Developer 啟用）==========
   const handleAppleSignIn = async () => {
     Alert.alert(
       'Apple Sign-In',
@@ -40,55 +43,65 @@ export default function SignIn() {
     );
   };
 
-  // ========== 孩子：邀請碼加入 ==========
   const handleJoinWithCode = async () => {
     if (!inviteCode.trim()) return;
 
     try {
       setLoading(true);
-
-      // 孩子用匿名帳號登入
       const cred = await auth().signInAnonymously();
       const uid = cred.user.uid;
-
-      // 兌換邀請碼（將 auth UID 綁定到 child user doc）
       await redeemInviteCode(inviteCode.trim(), uid);
-
       router.replace('/child/(tabs)/tasks');
     } catch (error: any) {
-      // 登入失敗要登出，避免殘留匿名帳號
       await auth().signOut();
-
       let message = error.message;
       if (error.message === 'INVALID_CODE') message = '邀請碼無效 / Invalid code';
       if (error.message === 'CODE_USED') message = '邀請碼已使用 / Code already used';
       if (error.message === 'CODE_EXPIRED') message = '邀請碼已過期 / Code expired';
-
       Alert.alert(t('common.error'), message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ========== Dev 模式：快速測試 ==========
   const handleDevSignIn = async (role: 'parent' | 'child') => {
+    const DEV_FAMILY_ID = 'dev-family-001';
     try {
       setLoading(true);
       const cred = await auth().signInAnonymously();
       const uid = cred.user.uid;
+      const now = firestore.FieldValue.serverTimestamp();
+      const batch = firestore().batch();
 
-      const userDoc = await firestore().collection('users').doc(uid).get();
-      if (!userDoc.exists) {
-        await firestore().collection('users').doc(uid).set({
-          displayName: role === 'parent' ? 'Dev Parent' : 'Dev Child',
-          avatarUrl: null,
-          authProvider: 'anonymous',
-          authProviderId: uid,
-          roleType: role,
-          birthday: null,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
+      batch.set(firestore().collection('users').doc(uid), {
+        displayName: role === 'parent' ? 'Dev Parent' : 'Dev Child',
+        avatarUrl: null,
+        authProvider: 'anonymous',
+        authProviderId: uid,
+        roleType: role,
+        birthday: null,
+        createdAt: now,
+      });
+
+      if (role === 'parent') {
+        batch.set(
+          firestore().collection('families').doc(DEV_FAMILY_ID),
+          { displayName: 'Dev Family', defaultGraceDays: 0, createdBy: uid, createdAt: now },
+          { merge: true }
+        );
       }
+
+      batch.set(
+        firestore().collection('familyMemberships').doc(`${DEV_FAMILY_ID}_${uid}`),
+        { familyId: DEV_FAMILY_ID, userId: uid, role, status: 'active', invitedBy: uid, joinedAt: now }
+      );
+
+      batch.set(
+        firestore().collection('pointWallets').doc(`${DEV_FAMILY_ID}_${uid}`),
+        { userId: uid, familyId: DEV_FAMILY_ID, balance: 0, updatedAt: now }
+      );
+
+      await batch.commit();
 
       router.replace(
         role === 'parent' ? '/parent/(tabs)/tasks' : '/child/(tabs)/tasks'
@@ -102,237 +115,300 @@ export default function SignIn() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#4A90D9" />
+      <View style={styles.loadingContainer}>
+        <Starfield />
+        <ActivityIndicator size="large" color={P.primary} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{t('auth.welcome')}</Text>
-      <Text style={styles.subtitle}>Mission for Kids</Text>
-
-      <View style={styles.buttonGroup}>
-        {/* 家長登入 */}
-        <Text style={styles.sectionLabel}>{t('auth.parentSignIn') || '家長登入'}</Text>
-
-        <TouchableOpacity
-          style={[styles.button, styles.appleButton]}
-          onPress={handleAppleSignIn}
+    <View style={styles.root}>
+      <Starfield />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          <Text style={styles.appleButtonText}>
-            {t('auth.signInWithApple')}
-          </Text>
-        </TouchableOpacity>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
+            >
+              <Display style={styles.title}>{t('auth.welcome')}</Display>
+              <BodySm style={styles.subtitle}>Mission for Kids</BodySm>
 
-        <TouchableOpacity
-          style={[styles.button, styles.googleButton]}
-          onPress={handleGoogleSignIn}
-        >
-          <Text style={styles.googleButtonText}>
-            {t('auth.signInWithGoogle')}
-          </Text>
-        </TouchableOpacity>
+              <View style={styles.buttonGroup}>
+                <Label style={styles.sectionLabel}>{t('auth.parentSignIn')}</Label>
 
-        {/* 孩子加入 */}
-        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>
-          {t('auth.childJoin') || '孩子加入'}
-        </Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.button,
+                    styles.appleButton,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={handleAppleSignIn}
+                >
+                  <AppText style={styles.appleButtonText}>
+                    {t('auth.signInWithApple')}
+                  </AppText>
+                </Pressable>
 
-        {showInviteCode ? (
-          <View style={styles.inviteCodeSection}>
-            <TextInput
-              style={styles.codeInput}
-              placeholder="XXXXXX"
-              value={inviteCode}
-              onChangeText={(text) => setInviteCode(text.toUpperCase())}
-              autoCapitalize="characters"
-              maxLength={6}
-              autoFocus
-            />
-            <View style={styles.codeActions}>
-              <TouchableOpacity
-                style={styles.cancelCodeBtn}
-                onPress={() => {
-                  setShowInviteCode(false);
-                  setInviteCode('');
-                }}
-              >
-                <Text style={styles.cancelCodeText}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.joinBtn,
-                  inviteCode.length < 6 && styles.joinBtnDisabled,
-                ]}
-                onPress={handleJoinWithCode}
-                disabled={inviteCode.length < 6}
-              >
-                <Text style={styles.joinBtnText}>
-                  {t('auth.join') || '加入'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.button, styles.inviteButton]}
-            onPress={() => setShowInviteCode(true)}
-          >
-            <Text style={styles.inviteButtonText}>
-              {t('auth.enterInviteCode') || '輸入邀請碼'}
-            </Text>
-          </TouchableOpacity>
-        )}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.button,
+                    styles.googleButton,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={handleGoogleSignIn}
+                >
+                  <AppText style={styles.googleButtonText}>
+                    {t('auth.signInWithGoogle')}
+                  </AppText>
+                </Pressable>
 
-        {/* Dev 模式 */}
-        {__DEV__ && (
-          <>
-            <Text style={[styles.sectionLabel, { marginTop: 24, color: '#999' }]}>
-              Dev Mode
-            </Text>
-            <View style={styles.devRow}>
-              <TouchableOpacity
-                style={styles.devButton}
-                onPress={() => handleDevSignIn('parent')}
-              >
-                <Text style={styles.devButtonText}>Dev Parent</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.devButton}
-                onPress={() => handleDevSignIn('child')}
-              >
-                <Text style={styles.devButtonText}>Dev Child</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-      </View>
+                <Label style={[styles.sectionLabel, { marginTop: spacing.lg }]}>
+                  {t('auth.childJoin')}
+                </Label>
+
+                {showInviteCode ? (
+                  <View style={styles.inviteCodeSection}>
+                    <TextInput
+                      style={styles.codeInput}
+                      placeholder="XXXXXX"
+                      placeholderTextColor={P.muted}
+                      value={inviteCode}
+                      onChangeText={(text) => setInviteCode(text.toUpperCase())}
+                      autoCapitalize="characters"
+                      maxLength={6}
+                      autoFocus
+                      returnKeyType="done"
+                      onSubmitEditing={() => {
+                        if (inviteCode.length === 6) handleJoinWithCode();
+                      }}
+                    />
+                    <View style={styles.codeActions}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.cancelCodeBtn,
+                          pressed && styles.pressed,
+                        ]}
+                        onPress={() => {
+                          setShowInviteCode(false);
+                          setInviteCode('');
+                          Keyboard.dismiss();
+                        }}
+                      >
+                        <AppText style={styles.cancelCodeText}>
+                          {t('common.cancel')}
+                        </AppText>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.joinBtn,
+                          inviteCode.length < 6 && styles.joinBtnDisabled,
+                          pressed && inviteCode.length === 6 && styles.pressed,
+                        ]}
+                        onPress={handleJoinWithCode}
+                        disabled={inviteCode.length < 6}
+                      >
+                        <AppText style={styles.joinBtnText}>
+                          {t('auth.join')}
+                        </AppText>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.button,
+                      styles.inviteButton,
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={() => setShowInviteCode(true)}
+                  >
+                    <AppText style={styles.inviteButtonText}>
+                      {t('auth.enterInviteCode')}
+                    </AppText>
+                  </Pressable>
+                )}
+
+                <Label style={[styles.sectionLabel, { marginTop: spacing.lg, opacity: 0.6 }]}>
+                  Beta 測試帳號
+                </Label>
+                <View style={styles.devRow}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.devButton,
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={() => handleDevSignIn('parent')}
+                  >
+                    <AppText style={styles.devButtonText}>以家長身分進入</AppText>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.devButton,
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={() => handleDevSignIn('child')}
+                  >
+                    <AppText style={styles.devButtonText}>以孩子身分進入</AppText>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
+    flex: 1,
+    backgroundColor: P.bg,
+  },
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 24,
+    backgroundColor: P.bg,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 8,
+    color: P.text,
+    fontSize: 30,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
   },
   subtitle: {
-    fontSize: 18,
-    color: '#666',
-    marginBottom: 48,
+    color: P.muted,
+    fontSize: 14,
+    marginBottom: spacing.xl,
+    letterSpacing: 1.2,
   },
   sectionLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 12,
+    color: P.muted,
+    marginBottom: spacing.sm,
     alignSelf: 'flex-start',
   },
   buttonGroup: {
     width: '100%',
-    gap: 12,
+    gap: spacing.sm,
   },
   button: {
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   appleButton: {
     backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: P.border,
   },
   appleButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: P.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
   googleButton: {
-    backgroundColor: '#fff',
+    backgroundColor: P.surface,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: P.border,
   },
   googleButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '600',
+    color: P.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
   inviteButton: {
-    backgroundColor: '#FF9500',
+    backgroundColor: P.primary,
+    ...shadow.glow,
   },
   inviteButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: P.bg,
+    fontSize: 15,
+    fontWeight: '800',
   },
   inviteCodeSection: {
     width: '100%',
-    gap: 12,
+    gap: spacing.sm,
   },
   codeInput: {
-    borderWidth: 2,
-    borderColor: '#FF9500',
-    borderRadius: 12,
-    padding: 16,
+    borderWidth: 1.5,
+    borderColor: P.primary,
+    borderRadius: radius.card,
+    padding: spacing.md,
     fontSize: 24,
     fontWeight: '700',
     textAlign: 'center',
     letterSpacing: 8,
-    color: '#333',
+    color: P.text,
+    backgroundColor: P.surface,
   },
   codeActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing.sm,
   },
   cancelCodeBtn: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
+    paddingVertical: 13,
+    borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: P.border,
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   cancelCodeText: {
-    color: '#666',
-    fontSize: 16,
+    color: P.muted,
+    fontSize: 14,
+    fontWeight: '700',
   },
   joinBtn: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#FF9500',
+    paddingVertical: 13,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
     alignItems: 'center',
+    ...shadow.glow,
   },
   joinBtnDisabled: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   joinBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: P.bg,
+    fontSize: 14,
+    fontWeight: '800',
   },
   devRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing.sm,
   },
   devButton: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    backgroundColor: 'transparent',
     alignItems: 'center',
   },
   devButtonText: {
-    color: '#999',
-    fontSize: 14,
+    color: P.muted,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

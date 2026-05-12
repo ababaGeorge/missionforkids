@@ -1,31 +1,66 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
-  Text,
-  FlatList,
-  TouchableOpacity,
+  ScrollView,
   StyleSheet,
-  TextInput,
+  Pressable,
   Modal,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
+  Dimensions,
 } from 'react-native';
-import { useTranslation } from 'react-i18next';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { RewardItem, RewardOrder } from '../../../types/models';
+import type { RewardItem, RewardOrder } from '../../../types/models';
+import { P, spacing, radius } from '../../../design/tokens';
+import { Starfield } from '../../../design/Starfield';
+import { RoughStar } from '../../../design/RoughStar';
+import { Empty } from '../../../design/Empty';
+import {
+  Display,
+  H3,
+  Body,
+  BodySm,
+  Label,
+  Muted,
+  Data,
+} from '../../../design/Text';
+
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = (width - spacing.lg * 2 - 10) / 2;
+
+const EMOJI_CHOICES = [
+  '🎁', '🍦', '🎮', '🎬', '📖', '🧸', '🍕', '🌙', '🎨', '⚽', '🎧', '💰',
+];
+
+const rewardEmoji = (title: string): string => {
+  const t = title || '';
+  if (/遊戲|電玩/.test(t)) return '🎮';
+  if (/書|讀/.test(t)) return '📖';
+  if (/玩具/.test(t)) return '🧸';
+  if (/冰淇淋|甜/.test(t)) return '🍦';
+  if (/電影/.test(t)) return '🎬';
+  if (/零用|錢/.test(t)) return '💰';
+  return '🎁';
+};
+
+type OrderWithChild = {
+  order: RewardOrder;
+  itemTitle: string;
+  childName: string;
+};
 
 export default function ParentRewards() {
-  const { t } = useTranslation();
   const uid = auth().currentUser?.uid;
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [items, setItems] = useState<RewardItem[]>([]);
-  const [orders, setOrders] = useState<RewardOrder[]>([]);
+  const [orders, setOrders] = useState<OrderWithChild[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [showOrders, setShowOrders] = useState(false);
-  const [newItem, setNewItem] = useState({
-    title: '',
-    pointCost: '50',
-    itemType: 'physical' as 'physical' | 'virtual',
-  });
 
   useEffect(() => {
     if (!uid) return;
@@ -35,8 +70,9 @@ export default function ParentRewards() {
       .where('status', '==', 'active')
       .limit(1)
       .onSnapshot((snap) => {
+        if (!snap) return;
         if (!snap.empty) setFamilyId(snap.docs[0].data().familyId);
-      });
+      }, (err) => console.error('[ParentRewards] membership error:', (err as any)?.code));
     return unsub;
   }, [uid]);
 
@@ -47,10 +83,11 @@ export default function ParentRewards() {
       .where('familyId', '==', familyId)
       .where('status', '==', 'active')
       .onSnapshot((snap) => {
+        if (!snap) return;
         setItems(
-          snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as RewardItem))
+          snap.docs.map((d) => ({ id: d.id, ...d.data() } as RewardItem))
         );
-      });
+      }, (err) => console.error('[ParentRewards] items error:', (err as any)?.code));
     return unsub;
   }, [familyId]);
 
@@ -61,41 +98,33 @@ export default function ParentRewards() {
       .where('familyId', '==', familyId)
       .where('status', 'in', ['pending', 'approved', 'delivered'])
       .orderBy('createdAt', 'desc')
-      .onSnapshot((snap) => {
-        setOrders(
-          snap.docs.map(
-            (doc) => ({ id: doc.id, ...doc.data() } as RewardOrder)
-          )
-        );
+      .onSnapshot(async (snap) => {
+        if (!snap) return;
+        const list: OrderWithChild[] = [];
+        for (const d of snap.docs) {
+          const order = { id: d.id, ...d.data() } as RewardOrder;
+          let itemTitle = '';
+          let childName = '';
+          try {
+            const itemDoc = await firestore()
+              .collection('rewardItems')
+              .doc(order.itemId)
+              .get();
+            itemTitle = itemDoc.data()?.title || '';
+          } catch {}
+          try {
+            const userDoc = await firestore()
+              .collection('users')
+              .doc(order.userId)
+              .get();
+            childName = userDoc.data()?.displayName || '';
+          } catch {}
+          list.push({ order, itemTitle, childName });
+        }
+        setOrders(list);
       });
     return unsub;
   }, [familyId]);
-
-  const handleCreateItem = async () => {
-    if (!familyId || !uid || !newItem.title.trim()) return;
-
-    await firestore().collection('rewardItems').add({
-      familyId,
-      title: newItem.title.trim(),
-      description: null,
-      pointCost: parseInt(newItem.pointCost) || 50,
-      itemType: newItem.itemType,
-      imageUrl: null,
-      status: 'active',
-      createdBy: uid,
-      createdAt: firestore.FieldValue.serverTimestamp(),
-    });
-
-    setNewItem({ title: '', pointCost: '50', itemType: 'physical' });
-    setShowCreate(false);
-  };
-
-  const handleApproveOrder = async (orderId: string) => {
-    await firestore().collection('rewardOrders').doc(orderId).update({
-      status: 'approved',
-      approvedAt: firestore.FieldValue.serverTimestamp(),
-    });
-  };
 
   const handleDeliverOrder = async (orderId: string) => {
     const now = new Date();
@@ -107,251 +136,487 @@ export default function ParentRewards() {
     });
   };
 
-  const renderItem = ({ item }: { item: RewardItem }) => (
-    <View style={styles.card}>
-      <Text style={styles.itemTitle}>{item.title}</Text>
-      <Text style={styles.itemCost}>
-        {item.pointCost} {t('common.points')}
-      </Text>
-      <Text style={styles.itemType}>
-        {item.itemType === 'physical' ? t('rewards.physical') : t('rewards.virtual')}
-      </Text>
-    </View>
-  );
-
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={[styles.tab, !showOrders && styles.tabActive]}
-          onPress={() => setShowOrders(false)}
-        >
-          <Text style={[styles.tabText, !showOrders && styles.tabTextActive]}>
-            {t('rewards.store')}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, showOrders && styles.tabActive]}
-          onPress={() => setShowOrders(true)}
-        >
-          <Text style={[styles.tabText, showOrders && styles.tabTextActive]}>
-            {t('rewards.pendingOrders')} ({orders.length})
-          </Text>
-        </TouchableOpacity>
-      </View>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <Starfield count={12} />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Label color={P.muted}>禮物</Label>
+          <Display style={{ marginTop: 2 }}>{items.length} 個可以換</Display>
+        </View>
 
-      {showOrders ? (
-        <FlatList
-          data={orders}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item: order }) => (
-            <View style={styles.card}>
-              <Text style={styles.itemTitle}>
-                Order #{order.id.slice(-6)}
-              </Text>
-              <Text style={styles.itemCost}>
-                {order.pointCostSnapshot} {t('common.points')} — {order.status}
-              </Text>
-              {order.status === 'pending' && (
-                <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={() => handleApproveOrder(order.id)}
-                >
-                  <Text style={styles.actionBtnText}>{t('review.approve')}</Text>
-                </TouchableOpacity>
-              )}
-              {order.status === 'approved' && (
-                <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={() => handleDeliverOrder(order.id)}
-                >
-                  <Text style={styles.actionBtnText}>
-                    {t('rewards.markDelivered')}
-                  </Text>
-                </TouchableOpacity>
-              )}
+        <View style={styles.section}>
+          {items.length === 0 ? (
+            <Empty emoji="🎁" title="還沒有禮物" body="點右下角 + 新增一個" />
+          ) : (
+            <View style={styles.grid}>
+              {items.map((r) => (
+                <View key={r.id} style={styles.card}>
+                  <View style={styles.cardEmoji}>
+                    <Body style={{ fontSize: 26 }}>{rewardEmoji(r.title)}</Body>
+                  </View>
+                  <H3 style={{ marginTop: 10, fontSize: 14 }}>{r.title}</H3>
+                  <View style={styles.costRow}>
+                    <RoughStar size={12} glow={false} />
+                    <Data
+                      style={{
+                        marginLeft: 4,
+                        color: P.primary,
+                        fontSize: 13,
+                        fontWeight: '700',
+                      }}
+                    >
+                      {r.pointCost}
+                    </Data>
+                  </View>
+                </View>
+              ))}
             </View>
           )}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>{t('review.noReviews')}</Text>
-          }
-        />
-      ) : (
-        <FlatList
-          data={items}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>{t('tasks.noTasks')}</Text>
-          }
-        />
-      )}
+        </View>
 
-      {!showOrders && (
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => setShowCreate(true)}
-        >
-          <Text style={styles.fabText}>+</Text>
-        </TouchableOpacity>
-      )}
+        {orders.length > 0 && (
+          <View style={styles.section}>
+            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+              兌換紀錄
+            </Label>
+            {orders.map((o) => {
+              const isDeliverable = o.order.status === 'approved';
+              const statusLabel =
+                o.order.status === 'pending'
+                  ? '⏳ 等你確認（請到審核）'
+                  : o.order.status === 'approved'
+                  ? '✓ 準備交付'
+                  : '🎊 已交付';
+              return (
+                <View key={o.order.id} style={styles.orderRow}>
+                  <Body style={{ fontSize: 22 }}>
+                    {rewardEmoji(o.itemTitle)}
+                  </Body>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <H3 style={{ fontSize: 14 }}>{o.itemTitle || '—'}</H3>
+                    <Muted style={{ fontSize: 11, marginTop: 2 }}>
+                      {o.childName} · {statusLabel}
+                    </Muted>
+                  </View>
+                  <Data
+                    style={{
+                      color: P.muted,
+                      fontSize: 13,
+                      fontWeight: '700',
+                      marginRight: isDeliverable ? 12 : 0,
+                    }}
+                  >
+                    −★ {o.order.pointCostSnapshot}
+                  </Data>
+                  {isDeliverable && (
+                    <Pressable
+                      onPress={() => handleDeliverOrder(o.order.id)}
+                      style={styles.deliverBtn}
+                    >
+                      <Label style={{ color: P.bg, fontSize: 11 }}>
+                        已交付
+                      </Label>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
 
-      <Modal visible={showCreate} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t('rewards.createItem')}</Text>
+      <Pressable
+        onPress={() => setShowCreate(true)}
+        style={styles.fab}
+        hitSlop={10}
+      >
+        <Body style={{ color: P.bg, fontSize: 26, fontWeight: '800' }}>+</Body>
+      </Pressable>
 
-            <TextInput
-              style={styles.input}
-              placeholder={t('rewards.itemName')}
-              value={newItem.title}
-              onChangeText={(title) => setNewItem((s) => ({ ...s, title }))}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={t('rewards.pointCost')}
-              value={newItem.pointCost}
-              onChangeText={(pointCost) =>
-                setNewItem((s) => ({ ...s, pointCost }))
-              }
-              keyboardType="numeric"
-            />
+      <CreateRewardModal
+        visible={showCreate}
+        onClose={() => setShowCreate(false)}
+        familyId={familyId}
+        uid={uid}
+      />
+    </SafeAreaView>
+  );
+}
 
-            <View style={styles.typePicker}>
-              <TouchableOpacity
-                style={[
-                  styles.typeOption,
-                  newItem.itemType === 'physical' && styles.typeOptionSelected,
-                ]}
-                onPress={() =>
-                  setNewItem((s) => ({ ...s, itemType: 'physical' }))
-                }
-              >
-                <Text>{t('rewards.physical')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.typeOption,
-                  newItem.itemType === 'virtual' && styles.typeOptionSelected,
-                ]}
-                onPress={() =>
-                  setNewItem((s) => ({ ...s, itemType: 'virtual' }))
-                }
-              >
-                <Text>{t('rewards.virtual')}</Text>
-              </TouchableOpacity>
-            </View>
+function CreateRewardModal({
+  visible,
+  onClose,
+  familyId,
+  uid,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  familyId: string | null;
+  uid: string | undefined;
+}) {
+  const [title, setTitle] = useState('');
+  const [cost, setCost] = useState('50');
+  const [emoji, setEmoji] = useState('🎁');
+  const [itemType, setItemType] = useState<'physical' | 'virtual'>('physical');
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowCreate(false)}
-              >
-                <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleCreateItem}
-              >
-                <Text style={styles.saveButtonText}>{t('common.save')}</Text>
-              </TouchableOpacity>
+  const handleCreate = async () => {
+    if (!familyId || !uid || !title.trim()) return;
+    await firestore().collection('rewardItems').add({
+      familyId,
+      title: title.trim(),
+      description: null,
+      pointCost: parseInt(cost) || 50,
+      itemType,
+      imageUrl: null,
+      emoji,
+      status: 'active',
+      createdBy: uid,
+      createdAt: firestore.FieldValue.serverTimestamp(),
+    });
+    setTitle('');
+    setCost('50');
+    setEmoji('🎁');
+    setItemType('physical');
+    onClose();
+  };
+
+  const costNum = parseInt(cost) || 0;
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={modalStyles.overlay}>
+            <View style={modalStyles.sheet}>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <View style={modalStyles.topBar}>
+                  <Pressable onPress={onClose}>
+                    <Label style={{ color: P.muted }}>取消</Label>
+                  </Pressable>
+                  <H3 style={{ fontSize: 15 }}>新增禮物</H3>
+                  <Pressable
+                    onPress={handleCreate}
+                    disabled={!title.trim()}
+                    style={[
+                      modalStyles.saveChip,
+                      !title.trim() && { opacity: 0.5 },
+                    ]}
+                  >
+                    <Label style={{ color: P.bg, fontSize: 12 }}>儲存</Label>
+                  </Pressable>
+                </View>
+
+                <View style={modalStyles.nameCard}>
+                  <View style={modalStyles.nameEmoji}>
+                    <Body style={{ fontSize: 36 }}>{emoji}</Body>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Label color={P.muted}>名字</Label>
+                    <TextInput
+                      value={title}
+                      onChangeText={setTitle}
+                      placeholder="例：吃冰淇淋"
+                      placeholderTextColor={P.muted}
+                      style={modalStyles.nameInput}
+                    />
+                  </View>
+                </View>
+
+                <View style={modalStyles.box}>
+                  <Label color={P.muted} style={{ marginBottom: 10 }}>
+                    選個圖案
+                  </Label>
+                  <View style={modalStyles.emojiGrid}>
+                    {EMOJI_CHOICES.map((e) => {
+                      const on = emoji === e;
+                      return (
+                        <Pressable
+                          key={e}
+                          onPress={() => setEmoji(e)}
+                          style={[
+                            modalStyles.emojiCell,
+                            on && modalStyles.emojiCellOn,
+                          ]}
+                        >
+                          <Body style={{ fontSize: 20 }}>{e}</Body>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={modalStyles.costBox}>
+                  <Label color={P.muted}>★ 星光價格</Label>
+                  <View style={modalStyles.stepper}>
+                    <Pressable
+                      onPress={() =>
+                        setCost(String(Math.max(5, costNum - 5)))
+                      }
+                      style={modalStyles.stepBtn}
+                    >
+                      <Body style={{ color: P.muted, fontSize: 18 }}>−</Body>
+                    </Pressable>
+                    <Data
+                      style={{
+                        color: P.primary,
+                        fontSize: 22,
+                        fontWeight: '700',
+                        marginHorizontal: 12,
+                        minWidth: 60,
+                        textAlign: 'center',
+                      }}
+                    >
+                      ★ {costNum}
+                    </Data>
+                    <Pressable
+                      onPress={() => setCost(String(costNum + 5))}
+                      style={modalStyles.stepBtnOn}
+                    >
+                      <Body style={{ color: P.bg, fontSize: 18, fontWeight: '800' }}>+</Body>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View style={modalStyles.box}>
+                  <Label color={P.muted}>類型</Label>
+                  <View style={modalStyles.typeRow}>
+                    {(['physical', 'virtual'] as const).map((tp) => {
+                      const on = itemType === tp;
+                      return (
+                        <Pressable
+                          key={tp}
+                          onPress={() => setItemType(tp)}
+                          style={[
+                            modalStyles.typeBtn,
+                            on && modalStyles.typeBtnOn,
+                          ]}
+                        >
+                          <Label
+                            style={{
+                              color: on ? P.bg : P.text,
+                              fontSize: 12,
+                            }}
+                          >
+                            {tp === 'physical' ? '實體獎勵' : '虛擬獎勵'}
+                          </Label>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              </ScrollView>
             </View>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  tab: { flex: 1, paddingVertical: 14, alignItems: 'center' },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#4A90D9' },
-  tabText: { fontSize: 14, color: '#999' },
-  tabTextActive: { color: '#4A90D9', fontWeight: '600' },
-  list: { padding: 16 },
+  safe: { flex: 1, backgroundColor: P.bg },
+  scroll: { paddingBottom: 140 },
+  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  section: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    width: CARD_WIDTH,
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: P.border,
   },
-  itemTitle: { fontSize: 16, fontWeight: '600', color: '#333' },
-  itemCost: { fontSize: 14, color: '#4A90D9', fontWeight: '700', marginTop: 4 },
-  itemType: { fontSize: 12, color: '#999', marginTop: 2 },
-  actionBtn: {
-    marginTop: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#4A90D9',
+  cardEmoji: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: `${P.primary}22`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  costRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  orderRow: {
+    padding: 12,
+    backgroundColor: P.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: P.border,
+    marginBottom: 6,
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  actionBtnText: { color: '#fff', fontWeight: '600' },
+  deliverBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+  },
   fab: {
     position: 'absolute',
-    bottom: 24,
-    right: 24,
+    right: 18,
+    bottom: 92,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#4A90D9',
-    justifyContent: 'center',
+    backgroundColor: P.primary,
     alignItems: 'center',
-    elevation: 5,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
-  fabText: { fontSize: 28, color: '#fff', fontWeight: '300' },
-  emptyText: { textAlign: 'center', color: '#999', fontSize: 16, marginTop: 48 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
   },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: '#333', marginBottom: 20 },
-  input: {
+  sheet: {
+    backgroundColor: P.bg,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: P.border,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+    maxHeight: '88%',
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  saveChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+  },
+  nameCard: {
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.xl,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 16,
-    marginBottom: 12,
+    borderColor: P.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
-  typePicker: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  typeOption: {
+  nameEmoji: {
+    width: 72,
+    height: 72,
+    borderRadius: radius.lg,
+    backgroundColor: `${P.primary}33`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nameInput: {
+    marginTop: 4,
+    padding: 0,
+    paddingVertical: 4,
+    color: P.text,
+    fontSize: 20,
+    fontWeight: '700',
+    borderBottomWidth: 2,
+    borderBottomColor: P.primary,
+  },
+  box: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  emojiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  emojiCell: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: P.bg,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emojiCellOn: {
+    backgroundColor: `${P.primary}33`,
+    borderWidth: 2,
+    borderColor: P.primary,
+  },
+  costBox: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: P.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    backgroundColor: P.bg,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnOn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  typeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  typeBtn: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: P.border,
+    backgroundColor: P.surfaceHi,
     alignItems: 'center',
   },
-  typeOptionSelected: { borderColor: '#4A90D9', backgroundColor: '#EBF3FC' },
-  modalActions: { flexDirection: 'row', gap: 12 },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    alignItems: 'center',
+  typeBtnOn: {
+    backgroundColor: P.primary,
+    borderColor: P.primary,
   },
-  cancelButtonText: { color: '#666', fontSize: 16 },
-  saveButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#4A90D9',
-    alignItems: 'center',
-  },
-  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

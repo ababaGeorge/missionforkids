@@ -1,35 +1,64 @@
 import { useState, useEffect } from 'react';
 import {
   View,
-  Text,
-  FlatList,
-  TouchableOpacity,
+  ScrollView,
   StyleSheet,
+  Pressable,
   TextInput,
   Modal,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
-import { useTranslation } from 'react-i18next';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
-import { Family, FamilyMembership, User } from '../../../types/models';
-import { createInviteCode } from '../../../lib/inviteCode';
+import functions from '@react-native-firebase/functions';
+import type { Family, FamilyMembership, User } from '../../../types/models';
+import { createInviteCode, createParentInviteCode } from '../../../lib/inviteCode';
+import { P, spacing, radius } from '../../../design/tokens';
+import { Starfield } from '../../../design/Starfield';
+import { RoughStar } from '../../../design/RoughStar';
+import { Empty } from '../../../design/Empty';
+import {
+  Display,
+  H3,
+  Body,
+  BodySm,
+  Label,
+  Muted,
+  Data,
+} from '../../../design/Text';
 
-interface MemberWithUser {
-  membership: FamilyMembership;
-  user: User;
-}
+type MemberRow = { membership: FamilyMembership; user: User };
+
+type InviteRow = {
+  code: string;
+  childUserId: string | null;
+  childName: string;
+  role: 'parent' | 'child';
+  used: boolean;
+  expired: boolean;
+  expiresAt: Date;
+};
 
 export default function FamilyScreen() {
-  const { t } = useTranslation();
   const uid = auth().currentUser?.uid;
   const [family, setFamily] = useState<Family | null>(null);
-  const [members, setMembers] = useState<MemberWithUser[]>([]);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [invites, setInvites] = useState<InviteRow[]>([]);
+
   const [showCreateFamily, setShowCreateFamily] = useState(false);
-  const [showAddChild, setShowAddChild] = useState(false);
   const [familyName, setFamilyName] = useState('');
+  const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [showGrant, setShowGrant] = useState(false);
+  const [grantTarget, setGrantTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [grantAmount, setGrantAmount] = useState('10');
+  const [grantReason, setGrantReason] = useState('');
 
   useEffect(() => {
     if (!uid) return;
@@ -39,19 +68,14 @@ export default function FamilyScreen() {
       .where('status', '==', 'active')
       .limit(1)
       .onSnapshot(async (snap) => {
-        if (snap.empty) {
+        if (!snap || snap.empty) {
           setFamily(null);
           return;
         }
-        const familyId = snap.docs[0].data().familyId;
-        const familyDoc = await firestore()
-          .collection('families')
-          .doc(familyId)
-          .get();
-        const familyData = familyDoc.data();
-        if (familyData) {
-          setFamily({ id: familyDoc.id, ...familyData } as Family);
-        }
+        const fid = snap.docs[0].data().familyId;
+        const fdoc = await firestore().collection('families').doc(fid).get();
+        const fdata = fdoc.data();
+        if (fdata) setFamily({ id: fdoc.id, ...fdata } as Family);
       });
     return unsub;
   }, [uid]);
@@ -63,55 +87,86 @@ export default function FamilyScreen() {
       .where('familyId', '==', family.id)
       .where('status', '==', 'active')
       .onSnapshot(async (snap) => {
-        const memberList: MemberWithUser[] = [];
-        for (const doc of snap.docs) {
-          const mem = { id: doc.id, ...doc.data() } as FamilyMembership;
-          const userDoc = await firestore()
-            .collection('users')
-            .doc(mem.userId)
-            .get();
-          const userData = userDoc.data();
-          if (userData) {
-            memberList.push({
-              membership: mem,
-              user: { id: userDoc.id, ...userData } as User,
-            });
-          }
+        if (!snap) return;
+        const rows: MemberRow[] = [];
+        for (const d of snap.docs) {
+          const mem = { id: d.id, ...d.data() } as FamilyMembership;
+          const udoc = await firestore().collection('users').doc(mem.userId).get();
+          const ud = udoc.data();
+          if (ud) rows.push({ membership: mem, user: { id: udoc.id, ...ud } as User });
         }
-        setMembers(memberList);
+        setMembers(rows);
+      });
+    return unsub;
+  }, [family?.id]);
+
+  useEffect(() => {
+    if (!family) return;
+    const unsub = firestore()
+      .collection('inviteCodes')
+      .where('familyId', '==', family.id)
+      .onSnapshot(async (snap) => {
+        if (!snap) return;
+        const rows: InviteRow[] = [];
+        for (const d of snap.docs) {
+          const data = d.data();
+          const expiresAt = data.expiresAt.toDate();
+          const role = data.role || 'child';
+          let cn = '';
+          if (role === 'parent') cn = '家長';
+          else if (data.childUserId) {
+            try {
+              const cd = await firestore().collection('users').doc(data.childUserId).get();
+              cn = cd.data()?.displayName || '';
+            } catch {}
+          }
+          rows.push({
+            code: d.id,
+            childUserId: data.childUserId || null,
+            childName: cn,
+            role,
+            used: data.used,
+            expired: expiresAt < new Date(),
+            expiresAt,
+          });
+        }
+        rows.sort((a, b) => {
+          if (!a.used && !a.expired && (b.used || b.expired)) return -1;
+          if ((a.used || a.expired) && !b.used && !b.expired) return 1;
+          return b.expiresAt.getTime() - a.expiresAt.getTime();
+        });
+        setInvites(rows);
       });
     return unsub;
   }, [family?.id]);
 
   const handleCreateFamily = async () => {
     if (!uid || !familyName.trim()) return;
-
-    const familyRef = await firestore().collection('families').add({
+    const ref = await firestore().collection('families').add({
       displayName: familyName.trim(),
       defaultGraceDays: 2,
       createdBy: uid,
       createdAt: firestore.FieldValue.serverTimestamp(),
     });
-
-    await firestore().collection('familyMemberships').add({
-      familyId: familyRef.id,
-      userId: uid,
-      role: 'parent',
-      status: 'active',
-      invitedBy: uid,
-      joinedAt: firestore.FieldValue.serverTimestamp(),
-    });
-
+    await firestore()
+      .collection('familyMemberships')
+      .doc(`${uid}_${ref.id}`)
+      .set({
+        familyId: ref.id,
+        userId: uid,
+        role: 'parent',
+        status: 'active',
+        invitedBy: uid,
+        joinedAt: firestore.FieldValue.serverTimestamp(),
+      });
     setFamilyName('');
     setShowCreateFamily(false);
   };
 
   const handleAddChild = async () => {
     if (!uid || !family || !childName.trim()) return;
-
     try {
-      // 建立 child user doc（authProviderId 留空，等孩子用邀請碼加入時填入）
-      const childUserRef = await firestore().collection('users').add({
+      const childRef = await firestore().collection('users').add({
         displayName: childName.trim(),
         avatarUrl: null,
         authProvider: 'anonymous',
@@ -120,274 +175,554 @@ export default function FamilyScreen() {
         birthday: null,
         createdAt: firestore.FieldValue.serverTimestamp(),
       });
-
-      await firestore().collection('familyMemberships').add({
-        familyId: family.id,
-        userId: childUserRef.id,
-        role: 'child',
-        status: 'active',
-        invitedBy: uid,
-        joinedAt: firestore.FieldValue.serverTimestamp(),
-      });
-
-      // 產生 6 位邀請碼（24 小時有效）
-      const code = await createInviteCode(childUserRef.id, family.id);
+      await firestore()
+        .collection('familyMemberships')
+        .doc(`${childRef.id}_${family.id}`)
+        .set({
+          familyId: family.id,
+          userId: childRef.id,
+          role: 'child',
+          status: 'active',
+          invitedBy: uid,
+          joinedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      const code = await createInviteCode(childRef.id, family.id);
       setGeneratedCode(code);
       setChildName('');
-    } catch (error: any) {
-      Alert.alert(t('common.error'), error.message);
+    } catch (e: any) {
+      Alert.alert('錯誤', e.message || '加入失敗');
+    }
+  };
+
+  const handleInviteParent = async () => {
+    if (!uid || !family) return;
+    try {
+      const code = await createParentInviteCode(family.id, uid);
+      setGeneratedCode(code);
+      setShowAddChild(true);
+    } catch (e: any) {
+      Alert.alert('錯誤', e.message || '產生邀請碼失敗');
+    }
+  };
+
+  const handleRegenerate = async (childId: string) => {
+    if (!family) return;
+    try {
+      const code = await createInviteCode(childId, family.id);
+      Alert.alert('邀請碼', code);
+    } catch (e: any) {
+      Alert.alert('錯誤', e.message || '失敗');
+    }
+  };
+
+  const handleGrant = async () => {
+    if (!uid || !family || !grantTarget) return;
+    const amount = parseInt(grantAmount);
+    if (!amount || amount <= 0) return;
+    try {
+      const fn = functions().httpsCallable('grantPoints');
+      await fn({
+        childUserId: grantTarget.userId,
+        familyId: family.id,
+        amount,
+        reason: grantReason.trim() || '爸媽直接給',
+      });
+      Alert.alert('', `+${amount} ★ → ${grantTarget.name}`);
+      setShowGrant(false);
+      setGrantAmount('10');
+      setGrantReason('');
+      setGrantTarget(null);
+    } catch (e: any) {
+      Alert.alert('錯誤', e.message || '失敗');
     }
   };
 
   if (!family) {
     return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.noFamilyText}>
-          {t('family.createFamily')}
-        </Text>
-        <TouchableOpacity
-          style={styles.createFamilyBtn}
-          onPress={() => setShowCreateFamily(true)}
-        >
-          <Text style={styles.createFamilyBtnText}>
-            {t('family.createFamily')}
-          </Text>
-        </TouchableOpacity>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <Starfield count={10} />
+        <View style={styles.center}>
+          <Display style={{ textAlign: 'center', marginBottom: spacing.lg }}>
+            還沒有家庭
+          </Display>
+          <Muted style={{ textAlign: 'center', marginBottom: spacing.xl }}>
+            建立一個家庭，然後邀請孩子加入
+          </Muted>
+          <Pressable
+            onPress={() => setShowCreateFamily(true)}
+            style={styles.primaryBtn}
+          >
+            <Label style={{ color: P.bg, fontSize: 14 }}>建立家庭</Label>
+          </Pressable>
+        </View>
+        {renderCreateFamilyModal()}
+      </SafeAreaView>
+    );
+  }
 
-        <Modal visible={showCreateFamily} animationType="slide" transparent>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>{t('family.createFamily')}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t('family.familyName')}
-                value={familyName}
-                onChangeText={setFamilyName}
-              />
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => setShowCreateFamily(false)}
-                >
-                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.saveButton}
-                  onPress={handleCreateFamily}
-                >
-                  <Text style={styles.saveButtonText}>{t('common.save')}</Text>
-                </TouchableOpacity>
+  const parents = members.filter((m) => m.membership.role === 'parent');
+  const children = members.filter((m) => m.membership.role === 'child');
+
+  function renderCreateFamilyModal() {
+    return (
+      <Modal visible={showCreateFamily} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={modalStyles.overlay}>
+              <View style={modalStyles.sheet}>
+                <H3 style={{ marginBottom: spacing.md }}>建立家庭</H3>
+                <TextInput
+                  style={modalStyles.input}
+                  placeholder="家庭名稱"
+                  placeholderTextColor={P.muted}
+                  value={familyName}
+                  onChangeText={setFamilyName}
+                />
+                <View style={modalStyles.actions}>
+                  <Pressable
+                    onPress={() => setShowCreateFamily(false)}
+                    style={modalStyles.cancel}
+                  >
+                    <Label style={{ color: P.muted }}>取消</Label>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleCreateFamily}
+                    style={modalStyles.save}
+                  >
+                    <Label style={{ color: P.bg }}>建立</Label>
+                  </Pressable>
+                </View>
               </View>
             </View>
-          </View>
-        </Modal>
-      </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.familyHeader}>
-        <Text style={styles.familyName}>{family.displayName}</Text>
-      </View>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <Starfield count={10} />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Label color={P.muted}>設定</Label>
+          <Display style={{ marginTop: 2 }}>{family.displayName}</Display>
+        </View>
 
-      <FlatList
-        data={members}
-        keyExtractor={(item) => item.membership.id}
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <View style={styles.memberCard}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {item.user.displayName[0]?.toUpperCase()}
-              </Text>
-            </View>
-            <View>
-              <Text style={styles.memberName}>{item.user.displayName}</Text>
-              <Text style={styles.memberRole}>{item.membership.role}</Text>
-            </View>
+        {parents.length > 0 && (
+          <View style={styles.section}>
+            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+              家長
+            </Label>
+            {parents.map((m) => (
+              <View key={m.membership.id} style={styles.memberRow}>
+                <View style={[styles.avatar, { backgroundColor: P.blue }]}>
+                  <Label style={{ color: P.bg, fontSize: 14 }}>
+                    {m.user.displayName[0]?.toUpperCase() || '?'}
+                  </Label>
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <H3 style={{ fontSize: 15 }}>{m.user.displayName}</H3>
+                  <Muted style={{ fontSize: 11, marginTop: 2 }}>家長</Muted>
+                </View>
+              </View>
+            ))}
           </View>
         )}
-      />
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setShowAddChild(true)}
-      >
-        <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
-
-      <Modal visible={showAddChild} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            {generatedCode ? (
-              <>
-                <Text style={styles.modalTitle}>
-                  {t('family.inviteCode') || '邀請碼'}
-                </Text>
-                <Text style={styles.codeDisplay}>{generatedCode}</Text>
-                <Text style={styles.codeHint}>
-                  {t('family.inviteCodeHint') ||
-                    '請在孩子的裝置上輸入此邀請碼（24 小時內有效）'}
-                </Text>
-                <TouchableOpacity
-                  style={styles.saveButton}
-                  onPress={() => {
-                    setGeneratedCode(null);
-                    setShowAddChild(false);
-                  }}
-                >
-                  <Text style={styles.saveButtonText}>{t('common.done') || '完成'}</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.modalTitle}>{t('family.addChild')}</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder={t('family.childName')}
-                  value={childName}
-                  onChangeText={setChildName}
-                />
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={() => setShowAddChild(false)}
-                  >
-                    <Text style={styles.cancelButtonText}>
-                      {t('common.cancel')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.saveButton}
-                    onPress={handleAddChild}
-                  >
-                    <Text style={styles.saveButtonText}>
-                      {t('common.save')}
-                    </Text>
-                  </TouchableOpacity>
+        <View style={styles.section}>
+          <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+            小孩
+          </Label>
+          {children.length === 0 ? (
+            <Muted>還沒有小孩加入</Muted>
+          ) : (
+            children.map((m) => (
+              <View key={m.membership.id} style={styles.memberRow}>
+                <View style={[styles.avatar, { backgroundColor: P.primary }]}>
+                  <Label style={{ color: P.bg, fontSize: 14 }}>
+                    {m.user.displayName[0]?.toUpperCase() || '?'}
+                  </Label>
                 </View>
-              </>
-            )}
-          </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <H3 style={{ fontSize: 15 }}>{m.user.displayName}</H3>
+                  <Muted style={{ fontSize: 11, marginTop: 2 }}>小孩</Muted>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    setGrantTarget({
+                      userId: m.user.id,
+                      name: m.user.displayName,
+                    });
+                    setShowGrant(true);
+                  }}
+                  style={styles.grantPill}
+                >
+                  <RoughStar size={12} glow={false} />
+                  <Label style={{ color: P.primary, fontSize: 11, marginLeft: 4 }}>
+                    +
+                  </Label>
+                </Pressable>
+              </View>
+            ))
+          )}
         </View>
+
+        {invites.length > 0 && (
+          <View style={styles.section}>
+            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+              邀請碼
+            </Label>
+            {invites.map((code) => {
+              const statusColor = code.used
+                ? P.muted
+                : code.expired
+                ? P.accentHot
+                : P.green;
+              const statusLabel = code.used
+                ? '已使用'
+                : code.expired
+                ? '已過期'
+                : '有效';
+              return (
+                <View key={code.code} style={styles.codeRow}>
+                  <View style={{ flex: 1 }}>
+                    <Data
+                      style={{
+                        fontSize: 16,
+                        fontWeight: '700',
+                        letterSpacing: 2,
+                      }}
+                    >
+                      {code.code}
+                    </Data>
+                    <Muted style={{ fontSize: 11, marginTop: 2 }}>
+                      {code.childName}
+                    </Muted>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: `${statusColor}22` },
+                      ]}
+                    >
+                      <Label
+                        style={{ color: statusColor, fontSize: 11 }}
+                      >
+                        {statusLabel}
+                      </Label>
+                    </View>
+                    {(code.used || code.expired) &&
+                      code.role === 'child' &&
+                      code.childUserId && (
+                        <Pressable
+                          onPress={() => handleRegenerate(code.childUserId!)}
+                          style={{ marginTop: 4 }}
+                        >
+                          <Label style={{ color: P.primary, fontSize: 11 }}>
+                            重新產生
+                          </Label>
+                        </Pressable>
+                      )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        <View style={styles.section}>
+          <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+            帳號
+          </Label>
+          <Pressable
+            onPress={() => auth().signOut()}
+            style={styles.settingRow}
+          >
+            <Body style={{ fontSize: 14, fontWeight: '700' }}>登出</Body>
+            <Muted style={{ fontSize: 13 }}>›</Muted>
+          </Pressable>
+        </View>
+      </ScrollView>
+
+      <Pressable
+        onPress={() => {
+          Alert.alert('邀請成員', '', [
+            { text: '加入小孩', onPress: () => setShowAddChild(true) },
+            { text: '邀請家長', onPress: handleInviteParent },
+            { text: '取消', style: 'cancel' },
+          ]);
+        }}
+        style={styles.fab}
+        hitSlop={10}
+      >
+        <Body style={{ color: P.bg, fontSize: 26, fontWeight: '800' }}>+</Body>
+      </Pressable>
+
+      {renderCreateFamilyModal()}
+
+      {/* Add child / invite parent modal */}
+      <Modal visible={showAddChild} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={modalStyles.overlay}>
+              <View style={modalStyles.sheet}>
+                {generatedCode ? (
+                  <>
+                    <H3 style={{ marginBottom: spacing.md, textAlign: 'center' }}>
+                      邀請碼
+                    </H3>
+                    <Display
+                      style={{
+                        color: P.primary,
+                        textAlign: 'center',
+                        letterSpacing: 8,
+                        marginVertical: spacing.lg,
+                      }}
+                    >
+                      {generatedCode}
+                    </Display>
+                    <Muted style={{ textAlign: 'center', marginBottom: spacing.lg }}>
+                      在對方裝置輸入此邀請碼（24 小時內有效）
+                    </Muted>
+                    <Pressable
+                      onPress={() => {
+                        setGeneratedCode(null);
+                        setShowAddChild(false);
+                      }}
+                      style={modalStyles.save}
+                    >
+                      <Label style={{ color: P.bg }}>完成</Label>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <H3 style={{ marginBottom: spacing.md }}>加入小孩</H3>
+                    <TextInput
+                      style={modalStyles.input}
+                      placeholder="小孩名字"
+                      placeholderTextColor={P.muted}
+                      value={childName}
+                      onChangeText={setChildName}
+                      returnKeyType="done"
+                      onSubmitEditing={handleAddChild}
+                    />
+                    <View style={modalStyles.actions}>
+                      <Pressable
+                        onPress={() => setShowAddChild(false)}
+                        style={modalStyles.cancel}
+                      >
+                        <Label style={{ color: P.muted }}>取消</Label>
+                      </Pressable>
+                      <Pressable
+                        onPress={handleAddChild}
+                        style={modalStyles.save}
+                      >
+                        <Label style={{ color: P.bg }}>建立</Label>
+                      </Pressable>
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
-    </View>
+
+      {/* Grant points */}
+      <Modal visible={showGrant} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={modalStyles.overlay}>
+              <View style={modalStyles.sheet}>
+                <H3 style={{ marginBottom: spacing.md }}>
+                  直接給點 → {grantTarget?.name}
+                </H3>
+                <TextInput
+                  style={modalStyles.input}
+                  placeholder="點數"
+                  placeholderTextColor={P.muted}
+                  value={grantAmount}
+                  onChangeText={setGrantAmount}
+                  keyboardType="numeric"
+                  autoFocus
+                />
+                <TextInput
+                  style={modalStyles.input}
+                  placeholder="原因（選填）"
+                  placeholderTextColor={P.muted}
+                  value={grantReason}
+                  onChangeText={setGrantReason}
+                />
+                <View style={modalStyles.actions}>
+                  <Pressable
+                    onPress={() => {
+                      setShowGrant(false);
+                      setGrantTarget(null);
+                    }}
+                    style={modalStyles.cancel}
+                  >
+                    <Label style={{ color: P.muted }}>取消</Label>
+                  </Pressable>
+                  <Pressable onPress={handleGrant} style={modalStyles.save}>
+                    <Label style={{ color: P.bg }}>+{grantAmount || '0'} ★</Label>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 24,
-  },
-  noFamilyText: { fontSize: 18, color: '#666', marginBottom: 24 },
-  createFamilyBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    backgroundColor: '#4A90D9',
-  },
-  createFamilyBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  familyHeader: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  familyName: { fontSize: 22, fontWeight: '700', color: '#333' },
-  list: { padding: 16 },
-  memberCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+  safe: { flex: 1, backgroundColor: P.bg },
+  scroll: { paddingBottom: 140 },
+  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  section: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
+  memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: P.border,
+    marginBottom: 8,
   },
   avatar: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: '#4A90D9',
-    justifyContent: 'center',
+    borderRadius: radius.full,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatarText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  memberName: { fontSize: 16, fontWeight: '600', color: '#333' },
-  memberRole: { fontSize: 13, color: '#999', textTransform: 'capitalize' },
+  grantPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: `${P.primary}18`,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  codeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: P.border,
+    marginBottom: 6,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.md,
+    backgroundColor: P.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  primaryBtn: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+  },
   fab: {
     position: 'absolute',
-    bottom: 24,
-    right: 24,
+    right: 18,
+    bottom: 92,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#4A90D9',
-    justifyContent: 'center',
+    backgroundColor: P.primary,
     alignItems: 'center',
-    elevation: 5,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
-  fabText: { fontSize: 28, color: '#fff', fontWeight: '300' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
   },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: '#333', marginBottom: 20 },
+  sheet: {
+    backgroundColor: P.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: P.border,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
   input: {
+    padding: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 16,
+    borderColor: P.border,
+    backgroundColor: P.bg,
+    color: P.text,
+    fontSize: 15,
     marginBottom: 12,
   },
-  modalActions: { flexDirection: 'row', gap: 12 },
-  cancelButton: {
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: spacing.md,
+  },
+  cancel: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: P.border,
     alignItems: 'center',
   },
-  cancelButtonText: { color: '#666', fontSize: 16 },
-  saveButton: {
+  save: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#4A90D9',
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
     alignItems: 'center',
-  },
-  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  codeDisplay: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: '#FF9500',
-    textAlign: 'center',
-    letterSpacing: 8,
-    marginVertical: 24,
-    fontFamily: 'Courier',
-  },
-  codeHint: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
   },
 });

@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
+import { P } from '../design/tokens';
+import { Starfield } from '../design/Starfield';
 
 export default function Index() {
   const { user, loading } = useAuth();
@@ -21,7 +23,8 @@ export default function Index() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#4A90D9" />
+      <Starfield />
+      <ActivityIndicator size="large" color={P.primary} />
     </View>
   );
 }
@@ -31,6 +34,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: P.bg,
   },
 });
