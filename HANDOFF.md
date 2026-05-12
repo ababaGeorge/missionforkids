@@ -1,7 +1,7 @@
 # Mission for Kids — Session 交接文件
 
-> 建立時間：2026-04-12
-> 上一個 Session 完成了 Phase 1 的程式碼撰寫 + Firebase 基礎建設
+> 更新時間：2026-04-12
+> 上一個 Session 完成了 Phase 1 + Phase 2 程式碼撰寫 + Firebase 建設
 
 ---
 
@@ -14,7 +14,6 @@
 ## 設計文件
 
 - 批准的設計：`docs/design-core-loop-ai-demo.md`（APPROVED）
-- 開發計畫：`.claude/plans/zesty-toasting-nebula.md`
 
 ## 已完成的步驟
 
@@ -23,6 +22,7 @@
 - Firestore、Auth（Anonymous + Google）、Storage 已啟用
 - `GoogleService-Info.plist` + `google-services.json` 已下載
 - Apple Auth 待 Apple Developer 付費驗證通過
+- Secret Manager API 已啟用（for OpenAI key）
 
 ### Step 2: Auth 系統 ✅（程式碼完成，未測試）
 - `src/app/auth/sign-in.tsx` — Google Sign-In + 孩子邀請碼 + Dev 模式
@@ -41,7 +41,6 @@
 ### Step 4: Security Rules + Indexes ✅（已部署）
 - `firestore.rules` — pointWallets/pointTransactions 禁止 client 寫入
 - `firestore.indexes.json` — 9 個複合索引
-- `storage.rules` — 暫時 placeholder（Step 8 會寫正式版）
 
 ### Step 5: 相機 + 照片上傳 ✅（程式碼完成，未測試）
 - `src/lib/photoUpload.ts` — pickPhoto() + uploadPhoto()
@@ -56,34 +55,54 @@
 - `src/components/CelebrationOverlay.tsx` — confetti + 點數動畫
 - 整合到 `child/tasks.tsx`，偵測 approved 狀態觸發
 
+### Step 8: Storage Rules ✅（已部署）
+- `storage.rules` — 正式版安全規則
+  - `families/{familyId}/submissions/` — 家庭成員讀寫，via `firestore.exists()` 跨服務查詢
+  - `playground/{userId}/` — AI Playground 照片，僅本人可存取
+  - 限制 5MB、僅限圖片、不可覆蓋或刪除
+  - 其他路徑一律拒絕
+
+### Step 9: AI Playground ✅（程式碼完成，待部署 Cloud Function）
+- `functions/src/analyzePhoto.ts` — OpenAI Vision API callable function
+  - 使用 `gpt-4o-mini`，JSON response format
+  - 10 秒 timeout + fallback 訊息
+  - 結果記錄到 `aiPlaygroundLogs`
+  - **需要設定 OPENAI_API_KEY secret**：`firebase functions:secrets:set OPENAI_API_KEY`
+- `src/app/child/(tabs)/ai.tsx` — AI Playground tab
+  - 拍照 → 上傳到 `playground/{uid}/` → 呼叫 analyzePhoto → 顯示結果
+- `src/components/AIThinkingAnimation.tsx` — 跳動圓點動畫
+- i18n 已更新（en.json + zh-TW.json 加入 `ai.*` keys）
+
+### 依賴修復 ✅
+- `expo-build-properties` 從 55.0.13 降級到 ~1.0.10（SDK 54 相容）
+- `react` 從 19.2.5 降級到 19.1.0（SDK 54 要求）
+- `react-dom` override 到 19.1.0（避免 peer dep 衝突）
+- 修復 Node 25 simdjson dylib 問題（symlink 4.4.2 的 libsimdjson.31.dylib）
+
 ---
 
-## 待完成的步驟
+## 待完成的事項
 
 ### Step 1: Build（進行中）
-- EAS Build ID: `9cbac2df-7068-4dc9-bc83-b7e201352082`
+- 最新 Build：正在跑中（修好依賴版本後）
 - 檢查狀態：`PATH="/opt/homebrew/opt/node@22/bin:$PATH" eas build:list --limit 1`
-- 如果成功：下載 .app 安裝到模擬器
-  ```
-  # 取得下載 URL
-  PATH="/opt/homebrew/opt/node@22/bin:$PATH" eas build:view BUILD_ID --json | python3 -c "import sys,json; print(json.load(sys.stdin)['artifacts']['applicationArchiveUrl'])"
-  ```
-- 如果失敗：看 EAS Console 的 build logs 找錯誤
+- 之前三個 build 都因依賴問題失敗，已修復
 
-### Step 8: Storage Rules + 部署
-- 寫正式的 Storage 安全規則（家庭層級存取控制）
-- `firebase deploy --only storage`
-
-### Step 9: AI Playground（Phase 2）
-- Cloud Function `analyzePhoto`（呼叫 OpenAI Vision API）
-- `src/app/child/ai-playground.tsx`
-- `src/components/AIThinkingAnimation.tsx`
-- 需要 OpenAI API key
+### 待部署：analyzePhoto Cloud Function
+- 需先設定 OpenAI API key：
+  ```bash
+  firebase functions:secrets:set OPENAI_API_KEY
+  ```
+- 設定完後部署：
+  ```bash
+  cd functions && npm run build && cd .. && firebase deploy --only functions
+  ```
 
 ### 未完成的設定
 - [ ] Google Sign-In webClientId（Firebase Console → Authentication → Sign-in method → Google → Web client ID）
 - [ ] Apple Sign-In（等 Apple Developer 驗證通過）
 - [ ] Google Sign-In 在 Firebase Console 啟用後，設定到 sign-in.tsx 的 GoogleSignin.configure()
+- [ ] `@react-native-firebase/functions` 已安裝但需要新 build 才能使用
 
 ---
 
@@ -105,49 +124,36 @@ cd functions && npm run build && cd .. && firebase deploy --only functions
 # 部署 Firestore Rules
 firebase deploy --only firestore
 
+# 部署 Storage Rules
+firebase deploy --only storage
+
 # 查看 build 狀態
 PATH="/opt/homebrew/opt/node@22/bin:$PATH" eas build:list --limit 1
+
+# 設定 Secret（for Cloud Functions）
+firebase functions:secrets:set OPENAI_API_KEY
 ```
 
 ---
 
-## 檔案結構（新增/修改的檔案）
+## 新增/修改的檔案（本次 Session）
 
 ```
 manado/
-├── firebase.json              # Firebase 設定
-├── .firebaserc                # Firebase 專案連結
-├── firestore.rules            # Firestore 安全規則
-├── firestore.indexes.json     # 複合索引
-├── storage.rules              # Storage 安全規則（placeholder）
-├── eas.json                   # EAS Build 設定
-├── GoogleService-Info.plist   # iOS Firebase 設定
-├── google-services.json       # Android Firebase 設定
-├── plugins/
-│   └── withModularHeaders.js  # 自訂 Expo plugin（全域 modular headers）
+├── storage.rules              # 正式版 Storage 安全規則
+├── .gitignore                 # 加入 functions/lib/
+├── package.json               # 依賴修復 + react-dom override
 ├── functions/
 │   └── src/
-│       ├── index.ts
-│       ├── onTaskInstanceApproved.ts
-│       ├── onRewardOrderCreated.ts
-│       ├── onRewardOrderCancelledOrRejected.ts
-│       └── autoCompleteDeliveredOrders.ts
+│       ├── index.ts           # 加入 analyzePhoto export
+│       └── analyzePhoto.ts    # 新增：AI 照片分析 Cloud Function
 └── src/
-    ├── lib/
-    │   ├── inviteCode.ts      # 新增：邀請碼系統
-    │   └── photoUpload.ts     # 新增：相機 + Storage 上傳
     ├── components/
-    │   └── CelebrationOverlay.tsx  # 新增：慶祝動畫
-    ├── hooks/
-    │   └── useAuth.ts         # 修改：支援 authProviderId 查詢
-    └── app/
-        ├── auth/sign-in.tsx   # 重寫：Google OAuth + 邀請碼
-        ├── parent/(tabs)/
-        │   ├── family.tsx     # 修改：邀請碼生成
-        │   ├── review.tsx     # 重寫：修復 listener 洩漏
-        │   └── rewards.tsx    # 未改（useFamily 替換可選做）
-        └── child/(tabs)/
-            ├── tasks.tsx      # 重寫：真實相機 + 慶祝動畫
-            ├── rewards.tsx    # 修改：移除 client 端點數操作
-            └── points.tsx     # 修改：i18n 修正
+    │   └── AIThinkingAnimation.tsx  # 新增：AI 思考動畫
+    ├── i18n/
+    │   ├── en.json            # 新增 ai.* keys
+    │   └── zh-TW.json         # 新增 ai.* keys
+    └── app/child/(tabs)/
+        ├── _layout.tsx        # 新增 AI tab
+        └── ai.tsx             # 新增：AI Playground 畫面
 ```
