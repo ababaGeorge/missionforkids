@@ -12,11 +12,17 @@
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "store",
+      "autoIncrement": true
     },
     "production": {}
   },
   "submit": {
-    "production": {}
+    "production": {},
+    "preview": {
+      "ios": {
+        "ascAppId": "6763489617"
+      }
+    }
   }
 }

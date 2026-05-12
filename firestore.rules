@@ -5,15 +5,15 @@ service cloud.firestore {
 
     // ========== Helper Functions ==========
 
-    // 取得已登入使用者的 ID
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // 檢查使用者是否為指定家庭的成員
+    // 檢查使用者是否為指定家庭的 active 成員（doc ID = userId_familyId）
     function isFamilyMember(familyId) {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId));
+        exists(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)) &&
+        get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.status == 'active';
     }
 
     // 檢查使用者是否為指定家庭的家長
@@ -38,10 +38,13 @@ service cloud.firestore {
     }
 
     // ========== Family Memberships ==========
+    // doc ID 格式: userId_familyId
     match /familyMemberships/{membershipId} {
       allow read: if isSignedIn();
+      // 只有已登入使用者可以建立自己的 membership（或家長邀請）
       allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow update: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
     }
 
     // ========== Invite Codes ==========
@@ -52,32 +55,43 @@ service cloud.firestore {
     }
 
     // ========== Tasks ==========
+    // 只有同家庭的成員可以存取
     match /tasks/{taskId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
       allow create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn();
+      allow update: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
+      allow delete: if isSignedIn() &&
+        isFamilyParent(resource.data.familyId);
     }
 
     // ========== Task Instances ==========
     match /taskInstances/{instanceId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
       allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow update: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
     }
 
     // ========== Task Submissions ==========
     match /taskSubmissions/{submissionId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      // Submissions 是 immutable，不允許 client 修改
+      // 允許家長更新（寫 rejectNote）
+      allow update: if isSignedIn();
     }
 
     // ========== Point Wallets ==========
-    // 只有 Cloud Functions (admin SDK) 可以寫入
+    // 建立：使用者只能建立自己的 wallet，且初始餘額必須為 0
+    // 更新/刪除：只有 Cloud Functions (admin SDK)
     match /pointWallets/{walletId} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.balance == 0;
+      allow update, delete: if false;
     }
 
     // ========== Point Transactions ==========
@@ -89,16 +103,20 @@ service cloud.firestore {
 
     // ========== Reward Items ==========
     match /rewardItems/{itemId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
       allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow update: if isSignedIn() &&
+        isFamilyParent(resource.data.familyId);
     }
 
     // ========== Reward Orders ==========
     match /rewardOrders/{orderId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
       allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow update: if isSignedIn() &&
+        isFamilyMember(resource.data.familyId);
     }
 
     // ========== AI Playground Logs ==========

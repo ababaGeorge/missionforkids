@@ -7,3 +7,4 @@ export { onRewardOrderCreated } from './onRewardOrderCreated';
 export { onRewardOrderCancelledOrRejected } from './onRewardOrderCancelledOrRejected';
 export { autoCompleteDeliveredOrders } from './autoCompleteDeliveredOrders';
 export { analyzePhoto } from './analyzePhoto';
+export { grantPoints } from './grantPoints';
