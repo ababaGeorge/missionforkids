@@ -313,7 +313,8 @@ export default function FamilyScreen() {
       >
         <View style={styles.header}>
           <Label color={P.muted}>設定</Label>
-          <Display style={{ marginTop: 2 }}>{family.displayName}</Display>
+          <Display style={{ marginTop: 2 }}>家庭與權限</Display>
+          <Muted style={{ marginTop: 4, fontSize: 12 }}>{family.displayName}</Muted>
         </View>
 
         {parents.length > 0 && (
@@ -441,13 +442,31 @@ export default function FamilyScreen() {
 
         <View style={styles.section}>
           <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
-            帳號
+            一般
           </Label>
+          {([
+            { key: 'lang', label: '語言', value: '中文' },
+            { key: 'notif', label: '通知', value: '開啟' },
+            { key: 'review', label: '審核方式', value: '手動' },
+            { key: 'screen', label: '螢幕時間', value: '未設定' },
+          ] as const).map((row) => (
+            <Pressable
+              key={row.key}
+              onPress={() => Alert.alert(row.label, '尚未開放')}
+              style={styles.settingRow}
+            >
+              <Body style={{ fontSize: 14, fontWeight: '700' }}>{row.label}</Body>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Muted style={{ fontSize: 13 }}>{row.value}</Muted>
+                <Muted style={{ fontSize: 13 }}>›</Muted>
+              </View>
+            </Pressable>
+          ))}
           <Pressable
             onPress={() => auth().signOut()}
             style={styles.settingRow}
           >
-            <Body style={{ fontSize: 14, fontWeight: '700' }}>登出</Body>
+            <Body style={{ fontSize: 14, fontWeight: '700', color: P.accentHot }}>登出</Body>
             <Muted style={{ fontSize: 13 }}>›</Muted>
           </Pressable>
         </View>
@@ -599,9 +618,9 @@ const styles = StyleSheet.create({
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
+    padding: 14,
     backgroundColor: P.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: P.border,
     marginBottom: 8,
@@ -642,11 +661,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: spacing.md,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     backgroundColor: P.surface,
-    borderRadius: radius.md,
+    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: P.border,
+    marginBottom: 6,
   },
   center: {
     flex: 1,
