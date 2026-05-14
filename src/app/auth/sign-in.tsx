@@ -233,11 +233,15 @@ export default function SignIn() {
       });
 
       if (role === 'parent') {
-        batch.set(
-          firestore().collection('families').doc(DEV_FAMILY_ID),
-          { displayName: 'Dev Family', defaultGraceDays: 0, createdBy: uid, createdAt: now },
-          { merge: true }
-        );
+        // 只在 families doc 不存在時才 create — 若已存在改為 update，rule 會要求 isFamilyParent，
+        // 但新 uid 的 parent membership 也在同個 batch 還沒寫進去，會被 reject。
+        const famSnap = await firestore().collection('families').doc(DEV_FAMILY_ID).get();
+        if (!famSnap.exists) {
+          batch.set(
+            firestore().collection('families').doc(DEV_FAMILY_ID),
+            { displayName: 'Dev Family', defaultGraceDays: 0, createdBy: uid, createdAt: now }
+          );
+        }
       }
 
       batch.set(
