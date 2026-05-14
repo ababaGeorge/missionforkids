@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { View, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, ScrollView, StyleSheet, Pressable, Alert, Modal } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { useRouter } from 'expo-router';
@@ -24,6 +24,8 @@ export default function ChildMe() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [wallet, setWallet] = useState<PointWallet | null>(null);
   const [instances, setInstances] = useState<TaskInstance[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!uid) return;
@@ -80,15 +82,22 @@ export default function ChildMe() {
     return Math.floor((Date.now() - bd.getTime()) / (365.25 * 86400 * 1000));
   }, [user]);
 
+  const joinMonths = useMemo(() => {
+    if (!user?.createdAt) return null;
+    const c: any = user.createdAt;
+    const d: Date = typeof c?.toDate === 'function' ? c.toDate() : new Date(c);
+    return Math.max(1, Math.round((Date.now() - d.getTime()) / (30 * 86400 * 1000)));
+  }, [user]);
+
   const firstChar = (user?.displayName || '你').charAt(0);
 
   const badges: Badge[] = [
-    { id: 'b1', emoji: '🔥', zh: '連續 7 天', got: streak >= 7 },
-    { id: 'b2', emoji: '📚', zh: '讀書家', got: true },
-    { id: 'b3', emoji: '🎨', zh: '創作家', got: false },
-    { id: 'b4', emoji: '⭐', zh: '100 顆星', got: stars >= 100 },
-    { id: 'b5', emoji: '🌙', zh: '夜貓子', got: false },
-    { id: 'b6', emoji: '🏆', zh: '月冠軍', got: true },
+    { id: 'b1', emoji: '⭐', zh: '第一次', got: stars >= 5 },
+    { id: 'b2', emoji: '🔥', zh: '連 7 天', got: streak >= 7 },
+    { id: 'b3', emoji: '🌙', zh: '早睡達人', got: false },
+    { id: 'b4', emoji: '✨', zh: '100 星光', got: stars >= 100 },
+    { id: 'b5', emoji: '♪', zh: '音樂家', got: false },
+    { id: 'b6', emoji: '📖', zh: '讀書蟲', got: true },
   ];
 
   const badgeCount = badges.filter((b) => b.got).length;
@@ -143,28 +152,32 @@ export default function ChildMe() {
         {/* Avatar */}
         <View style={styles.avatarWrap}>
           <View style={styles.avatar}>
-            <Display style={{ color: P.bg, fontSize: 40 }}>{firstChar}</Display>
+            <Display style={{ color: P.bg, fontSize: 40, lineHeight: 48 }}>{firstChar}</Display>
           </View>
           <Display style={{ fontSize: 24, marginTop: spacing.md }}>
             {user?.displayName || '小朋友'}
           </Display>
-          {age != null && (
-            <Muted style={{ fontSize: 12, marginTop: 2 }}>{age} 歲</Muted>
+          {(age != null || joinMonths != null) && (
+            <Muted style={{ fontSize: 12, marginTop: 2 }}>
+              {age != null ? `${age} 歲` : ''}
+              {age != null && joinMonths != null ? ' · ' : ''}
+              {joinMonths != null ? `加入 ${joinMonths} 個月` : ''}
+            </Muted>
           )}
         </View>
 
         {/* Stats row */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Data style={{ color: P.primary, fontSize: 22, fontWeight: '700' }}>{stars}</Data>
+            <Data style={{ color: P.primary, fontSize: 22, lineHeight: 28, fontWeight: '700' }}>{stars}</Data>
             <Label color={P.muted} style={styles.statLabel}>總星光</Label>
           </View>
           <View style={styles.statCard}>
-            <Data style={{ color: P.accent, fontSize: 22, fontWeight: '700' }}>🔥 {streak}</Data>
+            <Data style={{ color: P.accent, fontSize: 22, lineHeight: 28, fontWeight: '700' }}>🔥 {streak}</Data>
             <Label color={P.muted} style={styles.statLabel}>連續天數</Label>
           </View>
           <View style={styles.statCard}>
-            <Data style={{ color: P.green, fontSize: 22, fontWeight: '700' }}>{badgeCount}</Data>
+            <Data style={{ color: P.green, fontSize: 22, lineHeight: 28, fontWeight: '700' }}>{badgeCount}</Data>
             <Label color={P.muted} style={styles.statLabel}>徽章</Label>
           </View>
         </View>
@@ -217,26 +230,65 @@ export default function ChildMe() {
           </View>
         </View>
 
-        {/* Settings list */}
-        <View style={styles.section}>
-          <View style={styles.settingsList}>
-            <View style={styles.settingsRow}>
-              <Label style={styles.settingsLabel}>語言</Label>
-              <Muted style={styles.settingsValue}>中文 / English</Muted>
-            </View>
-            <View style={styles.settingsDivider} />
-            <View style={styles.settingsRow}>
-              <Label style={styles.settingsLabel}>家長協助</Label>
-              <Muted style={styles.settingsValue}>→</Muted>
-            </View>
-            <View style={styles.settingsDivider} />
-            <Pressable onPress={handleSignOut} style={styles.settingsRow}>
-              <Label style={[styles.settingsLabel, { color: P.accentHot }]}>登出</Label>
-              <Muted style={styles.settingsValue}>→</Muted>
-            </Pressable>
-          </View>
-        </View>
+        <View style={{ height: spacing.lg }} />
       </ScrollView>
+
+      {/* Settings gear at top-right */}
+      <Pressable
+        onPress={() => setShowSettings(true)}
+        style={[styles.gearBtn, { top: insets.top + 10 }]}
+        hitSlop={10}
+      >
+        <Label style={{ color: P.muted, fontSize: 18, lineHeight: 22 }}>⚙</Label>
+      </Pressable>
+
+      {/* Settings modal */}
+      <Modal
+        visible={showSettings}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSettings(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowSettings(false)}
+        >
+          <Pressable style={styles.modalSheet} onPress={() => {}}>
+            <View style={styles.modalHeader}>
+              <Label style={{ color: P.muted, fontSize: 11, letterSpacing: 1.5 }}>
+                設定
+              </Label>
+              <Pressable onPress={() => setShowSettings(false)} hitSlop={10}>
+                <Label style={{ color: P.muted, fontSize: 16 }}>✕</Label>
+              </Pressable>
+            </View>
+            <View style={styles.settingsList}>
+              <View style={styles.settingsRow}>
+                <Label style={styles.settingsLabel}>語言</Label>
+                <Muted style={styles.settingsValue}>中文 / English</Muted>
+              </View>
+              <View style={styles.settingsDivider} />
+              <View style={styles.settingsRow}>
+                <Label style={styles.settingsLabel}>家長協助</Label>
+                <Muted style={styles.settingsValue}>→</Muted>
+              </View>
+              <View style={styles.settingsDivider} />
+              <Pressable
+                onPress={() => {
+                  setShowSettings(false);
+                  handleSignOut();
+                }}
+                style={styles.settingsRow}
+              >
+                <Label style={[styles.settingsLabel, { color: P.accentHot }]}>
+                  登出
+                </Label>
+                <Muted style={styles.settingsValue}>→</Muted>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -333,6 +385,44 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     alignItems: 'center',
+  },
+  signOutBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  gearBtn: {
+    position: 'absolute',
+    right: 18,
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: 'rgba(247,242,234,0.06)',
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(11,23,38,0.75)',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  modalSheet: {
+    backgroundColor: P.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: P.border,
+    padding: 18,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
   },
   settingsList: {
     backgroundColor: P.surface,

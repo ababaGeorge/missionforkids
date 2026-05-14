@@ -113,6 +113,7 @@ export default function ChildRewards() {
           const bt = (b as any).createdAt?.toMillis?.() || 0;
           return bt - at;
         });
+        console.log('[ChildRewards] orders fetched:', list.map((o) => ({ id: o.id, status: o.status, itemId: o.itemId })));
         setOrders(list);
       }, (err) => console.warn('[ChildRewards] orders error:', (err as any)?.code));
     return unsub;

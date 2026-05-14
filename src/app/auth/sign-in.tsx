@@ -91,6 +91,7 @@ async function seedDevTasks(familyId: string, childUid: string) {
   }
   await batch.commit();
   await seedDevRewards(familyId, childUid);
+  await seedDevOrder(familyId, childUid);
 }
 
 async function seedDevRewards(familyId: string, childUid: string) {
@@ -107,7 +108,7 @@ async function seedDevRewards(familyId: string, childUid: string) {
   const batch = firestore().batch();
   for (const r of rewards) {
     batch.set(
-      firestore().collection('rewardItems').doc(r.id),
+      firestore().collection('rewardItems').doc(`${r.id}-${childUid}`),
       {
         familyId,
         title: r.title,
@@ -124,6 +125,36 @@ async function seedDevRewards(familyId: string, childUid: string) {
     );
   }
   await batch.commit();
+}
+
+async function seedDevOrder(familyId: string, childUid: string) {
+  const sv = firestore.FieldValue.serverTimestamp();
+  const nowMs = Date.now();
+  const yesterday = firestore.Timestamp.fromDate(new Date(nowMs - 24 * 3600 * 1000));
+  const today4pm = (() => {
+    const d = new Date();
+    d.setHours(16, 0, 0, 0);
+    return firestore.Timestamp.fromDate(d);
+  })();
+  await firestore()
+    .collection('rewardOrders')
+    .doc(`dev-order-ice-${childUid}`)
+    .set(
+      {
+        familyId,
+        userId: childUid,
+        itemId: `dev-reward-ice-${childUid}`,
+        pointCostSnapshot: 0,
+        status: 'delivered',
+        cancelledAt: null,
+        approvedAt: yesterday,
+        deliveredAt: today4pm,
+        completedAt: null,
+        autoCompleteAt: null,
+        createdAt: yesterday,
+      },
+      { merge: true }
+    );
 }
 
 export default function SignIn() {

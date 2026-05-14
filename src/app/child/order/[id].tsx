@@ -114,10 +114,15 @@ export default function ChildOrderDetail() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <Starfield count={26} />
-      <View style={styles.sheetHeader}>
-        <View style={styles.sheetHandle} />
-        <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={10}>
-          <Body style={{ color: P.muted }}>✕</Body>
+      {/* Top header */}
+      <View style={styles.topHeader}>
+        <View style={{ width: 32 }} />
+        <View style={styles.handleWrap}>
+          <View style={styles.sheetHandle} />
+          <Muted style={{ fontSize: 11, marginTop: 4 }}>下滑關閉 · 或點 ✕</Muted>
+        </View>
+        <Pressable onPress={onClose} style={styles.closeRound} hitSlop={10}>
+          <Body style={{ color: P.text, fontSize: 16 }}>✕</Body>
         </Pressable>
       </View>
       <ScrollView
@@ -125,58 +130,65 @@ export default function ChildOrderDetail() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Label color={P.muted} style={{ textAlign: 'center' }}>
-          獎勵路程
+        {/* Label + Title */}
+        <Label color={P.muted} style={{ fontSize: 11, letterSpacing: 1.5 }}>
+          {declined ? '獎勵未通過' : '獎勵進行中'}
         </Label>
-        <View style={styles.heroEmojiBox}>
-          <Body style={{ fontSize: 48 }}>{rewardEmoji(item.title)}</Body>
+        <Display style={{ fontSize: 30, marginTop: 4 }}>{item.title}</Display>
+        {/* Reward card horizontal */}
+        <View style={styles.rewardRow}>
+          <View style={styles.rewardEmojiBox}>
+            <Body style={{ fontSize: 36 }}>
+              {item.emoji || rewardEmoji(item.title)}
+            </Body>
+          </View>
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <Muted style={{ fontSize: 11, letterSpacing: 1 }}>
+              #{order.id.slice(-4).toUpperCase()}
+            </Muted>
+            <Data style={{ color: P.primary, fontSize: 22, marginTop: 4, fontWeight: '800' }}>
+              − ★ {order.pointCostSnapshot || item.pointCost}
+            </Data>
+          </View>
         </View>
-        <Display style={{ fontSize: 22, textAlign: 'center', marginTop: spacing.md }}>
-          {item.title}
-        </Display>
-        <Body style={{ color: P.muted, fontSize: 13, textAlign: 'center', marginTop: 6 }}>
-          {order.status === 'pending' && '⏳ 等爸媽答應'}
-          {order.status === 'approved' && '✓ 馬上就到你手上'}
-          {order.status === 'delivered' && '🎁 送到了，確認收到'}
-          {order.status === 'completed' && '🎊 拿到了！'}
-          {declined && `💬 ${order.parentNote || '爸媽沒答應'}`}
-        </Body>
 
+        {/* Timeline 4 steps */}
         {!declined && (
-          <View style={styles.stepsBox}>
-            {steps.map((s, i) => {
-              const done = i <= cur;
-              const current = i === cur;
+          <View style={styles.steps4}>
+            {[
+              { zh: '已下單', ts: order.createdAt },
+              { zh: '爸媽確認', ts: order.approvedAt },
+              { zh: '已交付', ts: order.deliveredAt },
+              { zh: '你確認收到', ts: order.completedAt },
+            ].map((s, i, arr) => {
+              const cur4 = { pending: 0, approved: 1, delivered: 2, completed: 3 } as Record<string, number>;
+              const c = cur4[order.status] ?? 0;
+              const done = i < c;
+              const current = i === c;
+              const last = i === arr.length - 1;
               return (
-                <View key={s.k} style={styles.stepRow}>
-                  {i < steps.length - 1 && (
+                <View key={s.zh} style={styles.stepRow4}>
+                  {!last && (
                     <View
                       style={[
-                        styles.stepLine,
-                        { backgroundColor: done ? P.primary : P.border },
+                        styles.stepLine4,
+                        { backgroundColor: done ? P.green : P.border },
                       ]}
                     />
                   )}
                   <View
                     style={[
-                      styles.stepDot,
-                      {
-                        backgroundColor: done ? P.primary : P.surface,
-                        borderColor: done ? P.primary : P.border,
-                        ...(current
-                          ? {
-                              shadowColor: P.primary,
-                              shadowOpacity: 0.35,
-                              shadowRadius: 12,
-                              elevation: 6,
-                            }
-                          : {}),
-                      },
+                      styles.stepDot4,
+                      done
+                        ? { backgroundColor: P.green, borderColor: P.green }
+                        : current
+                        ? { backgroundColor: P.primary, borderColor: P.primary }
+                        : { backgroundColor: P.surface, borderColor: P.border },
                     ]}
                   >
                     <BodySm
                       style={{
-                        color: done ? P.bg : P.muted,
+                        color: done ? P.bg : current ? P.bg : P.muted,
                         fontWeight: '800',
                         fontSize: 13,
                       }}
@@ -185,17 +197,10 @@ export default function ChildOrderDetail() {
                     </BodySm>
                   </View>
                   <View style={{ flex: 1, marginLeft: 14 }}>
-                    <H3
-                      style={{
-                        fontSize: 14,
-                        color: done ? P.text : P.muted,
-                      }}
-                    >
+                    <H3 style={{ fontSize: 15, color: done || current ? P.text : P.muted }}>
                       {s.zh}
                     </H3>
-                    <Muted style={{ fontSize: 11, marginTop: 2 }}>
-                      {fmtWhen(s.ts)}
-                    </Muted>
+                    <Muted style={{ fontSize: 11, marginTop: 2 }}>{fmtWhen(s.ts)}</Muted>
                   </View>
                 </View>
               );
@@ -212,22 +217,30 @@ export default function ChildOrderDetail() {
           </View>
         )}
       </ScrollView>
+      {/* Footer: two buttons */}
       <View style={styles.footer}>
-        {(order.status === 'approved' || order.status === 'delivered') ? (
-          <Pressable
-            onPress={handleReceived}
-            style={[styles.primaryBtn, submitting && { opacity: 0.6 }]}
-            disabled={submitting}
-          >
-            <Label style={{ color: P.bg, fontSize: 14 }}>
-              {submitting ? '確認中…' : '✓ 我拿到了！'}
-            </Label>
-          </Pressable>
-        ) : (
-          <Pressable onPress={onClose} style={styles.primaryBtn}>
-            <Label style={{ color: P.bg, fontSize: 14 }}>好</Label>
-          </Pressable>
-        )}
+        <Pressable onPress={onClose} style={styles.cancelBtn}>
+          <Label style={{ color: P.muted, fontSize: 14 }}>
+            {order.status === 'pending' ? '取消訂單' : '回到主頁'}
+          </Label>
+        </Pressable>
+        <Pressable
+          onPress={
+            order.status === 'approved' || order.status === 'delivered'
+              ? handleReceived
+              : onClose
+          }
+          style={[styles.primaryBtn, submitting && { opacity: 0.6 }]}
+          disabled={submitting}
+        >
+          <Label style={{ color: P.bg, fontSize: 14, fontWeight: '800' }}>
+            {order.status === 'approved' || order.status === 'delivered'
+              ? submitting
+                ? '確認中…'
+                : '✓ 我拿到了！'
+              : '回到任務'}
+          </Label>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -235,6 +248,82 @@ export default function ChildOrderDetail() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: P.bg },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: 10,
+  },
+  handleWrap: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  closeRound: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,242,234,0.08)',
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rewardRow: {
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.card,
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+  },
+  rewardEmojiBox: {
+    width: 60,
+    height: 60,
+    borderRadius: 14,
+    backgroundColor: P.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  steps4: {
+    marginTop: spacing.xl,
+    alignSelf: 'stretch',
+    paddingHorizontal: 6,
+  },
+  stepRow4: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingBottom: spacing.md,
+    position: 'relative',
+  },
+  stepLine4: {
+    position: 'absolute',
+    left: 13,
+    top: 28,
+    bottom: -4,
+    width: 2,
+  },
+  stepDot4: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  cancelBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+  },
   sheetHeader: {
     paddingVertical: 10,
     alignItems: 'center',
@@ -262,9 +351,8 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.xl,
-    alignItems: 'center',
   },
   heroEmojiBox: {
     width: 92,

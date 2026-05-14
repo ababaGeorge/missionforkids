@@ -148,18 +148,18 @@ export default function ChildNotif() {
                   <View style={{ flex: 1, minWidth: 0, marginLeft: 12 }}>
                     <H3 style={{ fontSize: 14, fontWeight: '700', lineHeight: 18 }}>
                       {n.kind === 'approved'
-                        ? `${n.title} 通過了！`
-                        : `${n.title} 需要再試一次`}
+                        ? `媽媽通過了「${n.title}」✓`
+                        : `「${n.title}」再試一次`}
                     </H3>
                     <View style={styles.metaRow}>
                       <Muted style={{ fontSize: 11 }}>{fmtTime(n.reviewedAt)}</Muted>
-                      {n.kind === 'approved' && n.points != null && (
-                        <Data style={{ fontSize: 12, color: P.primary, marginLeft: 8, fontWeight: '700' }}>
-                          ★ {n.points}
-                        </Data>
-                      )}
                     </View>
                   </View>
+                  {n.kind === 'approved' && n.points != null && (
+                    <Data style={{ fontSize: 13, color: P.primary, marginLeft: 8, fontWeight: '800' }}>
+                      +{n.points}
+                    </Data>
+                  )}
                 </Pressable>
               );
             })
