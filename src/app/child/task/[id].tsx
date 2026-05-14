@@ -560,35 +560,30 @@ function Wait({
 }) {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <Starfield count={40} />
-      <View style={styles.sheetHeader}>
-        <View style={styles.sheetHandle} />
-        <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={10}>
-          <Body style={{ color: P.muted }}>✕</Body>
-        </Pressable>
-      </View>
+      <Starfield count={60} />
       <View style={styles.waitBody}>
-        <Body style={{ fontSize: 72, marginBottom: 12 }}>✨</Body>
-        <Display style={{ textAlign: 'center' }}>星光傳送中…</Display>
-        <Muted style={{ marginTop: 8, textAlign: 'center', maxWidth: 280 }}>
-          等爸媽看一眼就好 · {fmtWhen(submittedAt)}
-        </Muted>
-
-        <View style={styles.waitCard}>
-          <View style={styles.waitIcon}>
-            <Body style={{ fontSize: 26 }}>{emoji}</Body>
+        {/* Pip with dashed ring */}
+        <View style={styles.pipRing}>
+          <View style={styles.pipRingInner}>
+            <Text style={{ fontSize: 96, lineHeight: 110 }}>🦉</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <H3>{task.title}</H3>
-            <Muted style={{ marginTop: 2, fontSize: 12 }}>
-              提交 {fmtWhen(submittedAt)}
-            </Muted>
-          </View>
-          <RoughStar size={16} />
-          <Data style={{ color: P.primary, marginLeft: 6, fontWeight: '700' }}>
-            {task.points}
-          </Data>
         </View>
+        <Display style={{ textAlign: 'center', marginTop: spacing.lg }}>
+          星光正在傳送…
+        </Display>
+        <Muted style={{ marginTop: 10, textAlign: 'center', maxWidth: 280 }}>
+          Pip 正在幫你把今天的成果送出去
+        </Muted>
+        {/* Dot loading */}
+        <View style={styles.dotRow}>
+          <View style={styles.dot} />
+          <View style={styles.dot} />
+          <View style={styles.dot} />
+        </View>
+        {/* Minimal task summary line */}
+        <BodySm style={{ color: P.muted, marginTop: spacing.lg }}>
+          {task.title} · {emoji} · ★ {task.points} · {fmtWhen(submittedAt)}
+        </BodySm>
       </View>
       <View style={styles.footerBar}>
         <Pressable onPress={onClose} style={[styles.primaryBtn, styles.waitBack]}>
@@ -931,6 +926,35 @@ const styles = StyleSheet.create({
     backgroundColor: `${P.primary}18`,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  pipRing: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    borderWidth: 2,
+    borderColor: `${P.primary}50`,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pipRingInner: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(247,201,40,0.08)',
+  },
+  dotRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: spacing.md,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: P.primary,
   },
   celebGlow: {
     ...StyleSheet.absoluteFillObject,
