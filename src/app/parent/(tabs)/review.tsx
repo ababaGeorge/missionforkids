@@ -73,6 +73,13 @@ const rewardEmoji = (title: string): string => {
   return '🎁';
 };
 
+const CHILD_PALETTE = ['#F5A623', '#5EE0A8', '#6FA9E8', '#8B7ED8', '#FF6B47', '#FFD966'] as const;
+const childColorFor = (userId: string): string => {
+  let h = 0;
+  for (let i = 0; i < userId.length; i++) h = (h * 31 + userId.charCodeAt(i)) >>> 0;
+  return CHILD_PALETTE[h % CHILD_PALETTE.length];
+};
+
 const fmtWhen = (ts: any): string => {
   if (!ts) return '—';
   const d: Date = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
@@ -361,9 +368,17 @@ export default function ParentReview() {
                           ★ {it.taskPoints}
                         </Data>
                       </View>
-                      <Muted style={{ fontSize: 11, marginTop: 2 }}>
-                        {it.childName} · {fmtWhen(it.submission.submittedAt)}
-                      </Muted>
+                      <View style={styles.childRow}>
+                        <View
+                          style={[
+                            styles.childDot,
+                            { backgroundColor: childColorFor(it.instance.userId) },
+                          ]}
+                        />
+                        <Muted style={{ fontSize: 11 }}>
+                          {it.childName} · {fmtWhen(it.submission.submittedAt)}
+                        </Muted>
+                      </View>
                       {(it.instance.submissionCount || 0) > 1 && (
                         <Muted style={{ fontSize: 10, marginTop: 4 }}>
                           第 {it.instance.submissionCount}/3 次
@@ -492,9 +507,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
   },
   orderCard: {
-    padding: spacing.md,
+    padding: 14,
     backgroundColor: P.surfaceCream,
-    borderRadius: radius.lg,
+    borderRadius: radius.card,
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -503,15 +518,15 @@ const styles = StyleSheet.create({
   orderIcon: {
     width: 48,
     height: 48,
-    borderRadius: radius.md,
-    backgroundColor: `${P.primary}33`,
+    borderRadius: 12,
+    backgroundColor: '#F5A62333',
     alignItems: 'center',
     justifyContent: 'center',
   },
   taskCard: {
-    padding: spacing.md,
+    padding: 14,
     backgroundColor: P.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: P.border,
     marginBottom: 8,
@@ -523,10 +538,21 @@ const styles = StyleSheet.create({
   photoThumb: {
     width: 64,
     height: 64,
-    borderRadius: radius.md,
-    backgroundColor: P.surfaceHi,
+    borderRadius: 12,
+    backgroundColor: '#8A7A54',
     overflow: 'hidden',
     position: 'relative',
+  },
+  childRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  childDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   rowBetween: {
     flexDirection: 'row',
