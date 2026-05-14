@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -6,11 +6,12 @@ import {
   Pressable,
   Image,
   TextInput,
+  Modal,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
@@ -29,7 +30,6 @@ import {
   Display,
   H3,
   Body,
-  BodySm,
   Label,
   Muted,
   Data,
@@ -59,6 +59,7 @@ const emojiFor = (title: string): string => {
   if (/碗|盤|餐/.test(t)) return '🍽';
   if (/運動|跑/.test(t)) return '🏃';
   if (/畫/.test(t)) return '🎨';
+  if (/作業|功課|寫|算/.test(t)) return '📝';
   return '✦';
 };
 
@@ -90,14 +91,19 @@ const fmtWhen = (ts: any): string => {
   return d.toLocaleDateString();
 };
 
+const fmtTimeOfDay = (ts: any): string => {
+  if (!ts) return '';
+  const d: Date = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+};
+
 export default function ParentReview() {
   const uid = auth().currentUser?.uid;
   const { family } = useFamily(uid);
   const [reviewTasks, setReviewTasks] = useState<ReviewTask[]>([]);
   const [reviewOrders, setReviewOrders] = useState<ReviewOrder[]>([]);
-  const [note, setNote] = useState('');
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
+  const [activeOrder, setActiveOrder] = useState<ReviewOrder | null>(null);
 
   useEffect(() => {
     if (!family) return;
@@ -178,7 +184,180 @@ export default function ParentReview() {
 
   const total = reviewTasks.length + reviewOrders.length;
 
-  const handleApproveTask = async (item: ReviewTask) => {
+  return (
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <Starfield count={12} />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scroll}
+      >
+        <View style={styles.header}>
+          <Label color={P.muted}>審核</Label>
+          <Display style={{ marginTop: 2 }}>
+            {total === 0 ? '都審完了 🎉' : `${total} 個等你看`}
+          </Display>
+        </View>
+
+        {reviewOrders.length > 0 && (
+          <View style={styles.section}>
+            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+              禮物申請
+            </Label>
+            {reviewOrders.map((o) => (
+              <Pressable
+                key={o.order.id}
+                onPress={() => setActiveOrder(o)}
+                style={styles.orderCard}
+              >
+                <View style={styles.orderIcon}>
+                  <Body style={{ fontSize: 26 }}>
+                    {rewardEmoji(o.item?.title || '')}
+                  </Body>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Label style={{ color: '#8A8275' }}>
+                    {o.childName} 想換
+                  </Label>
+                  <H3 style={{ fontSize: 15, marginTop: 2, color: '#1C1A14' }}>
+                    {o.item?.title || '—'}
+                  </H3>
+                  <Data
+                    style={{
+                      fontSize: 13,
+                      marginTop: 4,
+                      color: '#1C1A14',
+                      fontWeight: '700',
+                    }}
+                  >
+                    −★ {o.order.pointCostSnapshot}
+                  </Data>
+                </View>
+                <Body style={{ color: '#8A8275', fontSize: 18 }}>›</Body>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {reviewTasks.length > 0 && (
+          <View style={styles.section}>
+            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+              任務
+            </Label>
+            {reviewTasks.map((it) => (
+              <Pressable
+                key={it.instance.id}
+                onPress={() => setActiveTask(it)}
+                style={styles.taskCard}
+              >
+                <View style={styles.taskCardInner}>
+                  <View style={styles.photoThumb}>
+                    {it.submission.photoUrls[0] ? (
+                      <Image
+                        source={{ uri: it.submission.photoUrls[0] }}
+                        style={StyleSheet.absoluteFillObject}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <Body
+                      style={{
+                        fontSize: 22,
+                        position: 'absolute',
+                        right: 6,
+                        bottom: 6,
+                        opacity: 0.8,
+                      }}
+                    >
+                      {emojiFor(it.taskTitle)}
+                    </Body>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={styles.rowBetween}>
+                      <H3 numberOfLines={1} style={{ fontSize: 15, flex: 1 }}>
+                        {it.taskTitle}
+                      </H3>
+                      <Data
+                        style={{
+                          color: P.primary,
+                          fontSize: 13,
+                          fontWeight: '700',
+                        }}
+                      >
+                        ★ {it.taskPoints}
+                      </Data>
+                    </View>
+                    <View style={styles.childRow}>
+                      <View
+                        style={[
+                          styles.childDot,
+                          { backgroundColor: childColorFor(it.instance.userId) },
+                        ]}
+                      />
+                      <Muted style={{ fontSize: 11 }}>
+                        {it.childName} · {fmtWhen(it.submission.submittedAt)}
+                      </Muted>
+                    </View>
+                    {(it.instance.submissionCount || 0) > 1 && (
+                      <Muted style={{ fontSize: 10, marginTop: 4 }}>
+                        第 {it.instance.submissionCount}/3 次
+                      </Muted>
+                    )}
+                    {it.submission.childNote ? (
+                      <Muted style={{ fontSize: 12, marginTop: 4, fontStyle: 'italic' }}>
+                        「{it.submission.childNote}」
+                      </Muted>
+                    ) : null}
+                  </View>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {total === 0 && (
+          <Empty
+            emoji="🌙"
+            title="休息一下"
+            body="小孩做完任務之後，會跑到這裡等你看。"
+          />
+        )}
+      </ScrollView>
+
+      <ReviewTaskSheet
+        item={activeTask}
+        uid={uid}
+        onClose={() => setActiveTask(null)}
+      />
+      <RedeemConfirmSheet
+        order={activeOrder}
+        familyId={family?.id}
+        uid={uid}
+        onClose={() => setActiveOrder(null)}
+      />
+    </SafeAreaView>
+  );
+}
+
+// =============================================================================
+// Review Task Sheet — spec 4.3
+// =============================================================================
+function ReviewTaskSheet({
+  item,
+  uid,
+  onClose,
+}: {
+  item: ReviewTask | null;
+  uid: string | undefined;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (!item) setNote('');
+  }, [item]);
+
+  if (!item) return null;
+
+  const handleApprove = async () => {
     await firestore()
       .collection('taskInstances')
       .doc(item.instance.id)
@@ -186,13 +365,12 @@ export default function ParentReview() {
         status: 'approved',
         reviewedBy: uid,
         reviewedAt: firestore.FieldValue.serverTimestamp(),
+        ...(note.trim() ? { parentNote: note.trim() } : {}),
       });
-    setNote('');
-    setRejectingId(null);
-    setExpanded(null);
+    onClose();
   };
 
-  const handleRejectTask = async (item: ReviewTask) => {
+  const handleReject = async () => {
     const currentCount = item.instance.submissionCount || 0;
     const newStatus = currentCount >= 3 ? 'missed' : 'rejected';
     const updates: Record<string, any> = {
@@ -211,287 +389,311 @@ export default function ParentReview() {
         .doc(item.submission.id)
         .update({ rejectNote: note.trim() });
     }
-    setNote('');
-    setRejectingId(null);
-    setExpanded(null);
     Keyboard.dismiss();
-  };
-
-  const handleApproveOrder = async (o: ReviewOrder) => {
-    await firestore()
-      .collection('rewardOrders')
-      .doc(o.order.id)
-      .update({
-        status: 'approved',
-        approvedAt: firestore.FieldValue.serverTimestamp(),
-      });
-  };
-
-  const handleRejectOrder = async (o: ReviewOrder) => {
-    await firestore()
-      .collection('rewardOrders')
-      .doc(o.order.id)
-      .update({
-        status: 'rejected',
-        parentNote: note.trim() || null,
-      });
-    setNote('');
-    setExpanded(null);
+    onClose();
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={80}
+    <Modal
+      visible={!!item}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <Starfield count={12} />
-        <ScrollView
+      <SafeAreaView style={sheetStyles.root} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={20}
         >
-          <View style={styles.header}>
-            <Label color={P.muted}>審核</Label>
-            <Display style={{ marginTop: 2 }}>
-              {total === 0 ? '都審完了 🎉' : `${total} 個等你看`}
-            </Display>
+          <View style={sheetStyles.dragBar} />
+          <View style={sheetStyles.topRow}>
+            <View style={{ width: 32 }} />
+            <View />
+            <Pressable onPress={onClose} hitSlop={10} style={sheetStyles.closeBtn}>
+              <Body style={{ color: P.muted, fontSize: 22 }}>✕</Body>
+            </Pressable>
           </View>
 
-          {reviewOrders.length > 0 && (
-            <View style={styles.section}>
-              <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
-                禮物申請
-              </Label>
-              {reviewOrders.map((o) => (
-                <View key={o.order.id}>
-                  <Pressable
-                    onPress={() =>
-                      setExpanded(expanded === o.order.id ? null : o.order.id)
-                    }
-                    style={styles.orderCard}
-                  >
-                    <View style={styles.orderIcon}>
-                      <Body style={{ fontSize: 26 }}>
-                        {rewardEmoji(o.item?.title || '')}
-                      </Body>
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Label style={{ color: '#8A8275' }}>
-                        {o.childName} 想換
-                      </Label>
-                      <H3 style={{ fontSize: 15, marginTop: 2, color: '#1C1A14' }}>
-                        {o.item?.title || '—'}
-                      </H3>
-                      <Data
-                        style={{
-                          fontSize: 13,
-                          marginTop: 4,
-                          color: '#1C1A14',
-                          fontWeight: '700',
-                        }}
-                      >
-                        −★ {o.order.pointCostSnapshot}
-                      </Data>
-                    </View>
-                    <Body style={{ color: '#8A8275', fontSize: 18 }}>›</Body>
-                  </Pressable>
-                  {expanded === o.order.id && (
-                    <View style={styles.inlineActions}>
-                      <Pressable
-                        onPress={() => handleRejectOrder(o)}
-                        style={styles.rejectBtn}
-                      >
-                        <Label style={{ color: P.accentHot }}>✕ 拒絕</Label>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => handleApproveOrder(o)}
-                        style={styles.approveBtn}
-                      >
-                        <Label style={{ color: P.bg }}>✓ 同意</Label>
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-              ))}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 16 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={sheetStyles.header}>
+              <View style={sheetStyles.avatarRow}>
+                <View
+                  style={[
+                    sheetStyles.childAvatar,
+                    { backgroundColor: childColorFor(item.instance.userId) },
+                  ]}
+                />
+                <Muted style={{ fontSize: 12 }}>{item.childName} 提交</Muted>
+              </View>
+              <H3 style={sheetStyles.taskTitle}>{item.taskTitle}</H3>
             </View>
-          )}
 
-          {reviewTasks.length > 0 && (
-            <View style={styles.section}>
-              <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
-                任務
-              </Label>
-              {reviewTasks.map((it) => (
-                <View key={it.instance.id} style={styles.taskCard}>
-                  <Pressable
-                    onPress={() =>
-                      setExpanded(
-                        expanded === it.instance.id ? null : it.instance.id
-                      )
-                    }
-                    style={styles.taskCardInner}
-                  >
-                    <View style={styles.photoThumb}>
-                      {it.submission.photoUrls[0] ? (
-                        <Image
-                          source={{ uri: it.submission.photoUrls[0] }}
-                          style={StyleSheet.absoluteFillObject}
-                          resizeMode="cover"
-                        />
-                      ) : null}
-                      <Body
-                        style={{
-                          fontSize: 22,
-                          position: 'absolute',
-                          right: 6,
-                          bottom: 6,
-                          opacity: 0.8,
-                        }}
-                      >
-                        {emojiFor(it.taskTitle)}
-                      </Body>
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <View style={styles.rowBetween}>
-                        <H3 numberOfLines={1} style={{ fontSize: 15, flex: 1 }}>
-                          {it.taskTitle}
-                        </H3>
-                        <Data
-                          style={{
-                            color: P.primary,
-                            fontSize: 13,
-                            fontWeight: '700',
-                          }}
-                        >
-                          ★ {it.taskPoints}
-                        </Data>
-                      </View>
-                      <View style={styles.childRow}>
-                        <View
-                          style={[
-                            styles.childDot,
-                            { backgroundColor: childColorFor(it.instance.userId) },
-                          ]}
-                        />
-                        <Muted style={{ fontSize: 11 }}>
-                          {it.childName} · {fmtWhen(it.submission.submittedAt)}
-                        </Muted>
-                      </View>
-                      {(it.instance.submissionCount || 0) > 1 && (
-                        <Muted style={{ fontSize: 10, marginTop: 4 }}>
-                          第 {it.instance.submissionCount}/3 次
-                        </Muted>
-                      )}
-                      {it.submission.childNote ? (
-                        <Muted style={{ fontSize: 12, marginTop: 4, fontStyle: 'italic' }}>
-                          「{it.submission.childNote}」
-                        </Muted>
-                      ) : null}
-                    </View>
-                  </Pressable>
-
-                  {expanded === it.instance.id && (
-                    <View style={styles.expandBody}>
-                      {it.submission.photoUrls[0] ? (
-                        <Image
-                          source={{ uri: it.submission.photoUrls[0] }}
-                          style={styles.expandPhoto}
-                          resizeMode="cover"
-                        />
-                      ) : null}
-                      {rejectingId === it.instance.id ? (
-                        <View>
-                          <TextInput
-                            style={styles.noteInput}
-                            placeholder="回一句話（選填）"
-                            placeholderTextColor={P.muted}
-                            value={note}
-                            onChangeText={setNote}
-                            multiline
-                            autoFocus
-                          />
-                          <View style={styles.quickChips}>
-                            {['做得很好！', '下次再仔細一點', '👍', '👏', '要重做喔'].map(
-                              (c) => (
-                                <Pressable
-                                  key={c}
-                                  onPress={() => setNote(c)}
-                                  style={styles.quickChip}
-                                >
-                                  <Label
-                                    style={{ color: P.primary, fontSize: 11 }}
-                                  >
-                                    {c}
-                                  </Label>
-                                </Pressable>
-                              )
-                            )}
-                          </View>
-                          <View style={styles.inlineActions}>
-                            <Pressable
-                              onPress={() => {
-                                setRejectingId(null);
-                                setNote('');
-                              }}
-                              style={styles.cancelBtn}
-                            >
-                              <Label style={{ color: P.muted }}>取消</Label>
-                            </Pressable>
-                            <Pressable
-                              onPress={() => handleRejectTask(it)}
-                              style={styles.rejectBtn}
-                            >
-                              <Label style={{ color: P.accentHot }}>
-                                ↺ 再試一次
-                              </Label>
-                            </Pressable>
-                          </View>
-                        </View>
-                      ) : (
-                        <View style={styles.inlineActions}>
-                          <Pressable
-                            onPress={() => setRejectingId(it.instance.id)}
-                            style={styles.rejectBtn}
-                          >
-                            <Label style={{ color: P.accentHot }}>
-                              ↺ 再試一次
-                            </Label>
-                          </Pressable>
-                          <Pressable
-                            onPress={() => handleApproveTask(it)}
-                            style={styles.approveBtn}
-                          >
-                            <RoughStar size={14} color={P.bg} glow={false} />
-                            <Label
-                              style={{
-                                color: P.bg,
-                                marginLeft: 6,
-                              }}
-                            >
-                              通過 +★ {it.taskPoints}
-                            </Label>
-                          </Pressable>
-                        </View>
-                      )}
-                    </View>
-                  )}
-                </View>
-              ))}
+            {/* 照片 4:3 */}
+            <View style={sheetStyles.photoBox}>
+              {item.submission.photoUrls[0] ? (
+                <Image
+                  source={{ uri: item.submission.photoUrls[0] }}
+                  style={StyleSheet.absoluteFillObject}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={sheetStyles.photoFallback} />
+              )}
+              <View style={sheetStyles.photoEmoji}>
+                <Body style={{ fontSize: 46, opacity: 0.6 }}>{emojiFor(item.taskTitle)}</Body>
+              </View>
+              <View style={sheetStyles.photoStamp}>
+                <Muted style={{ color: '#fff', fontSize: 11 }}>
+                  {fmtTimeOfDay(item.submission.submittedAt)}
+                </Muted>
+              </View>
             </View>
-          )}
 
-          {total === 0 && (
-            <Empty
-              emoji="🌙"
-              title="休息一下"
-              body="小孩做完任務之後，會跑到這裡等你看。"
-            />
-          )}
-        </ScrollView>
+            {/* 孩子備註 */}
+            {item.submission.childNote ? (
+              <View style={sheetStyles.noteCard}>
+                <Label style={{ color: P.muted, fontSize: 11 }}>
+                  {item.childName} 說：
+                </Label>
+                <Body style={{ fontSize: 13, marginTop: 4, lineHeight: 20 }}>
+                  「{item.submission.childNote}」
+                </Body>
+              </View>
+            ) : null}
+
+            {/* 家長回覆 */}
+            <View style={sheetStyles.replyCard}>
+              <Label style={{ color: P.muted, fontSize: 11, marginBottom: 8 }}>
+                回一句話（選填）
+              </Label>
+              <TextInput
+                style={sheetStyles.replyInput}
+                placeholder="例：做得很好！"
+                placeholderTextColor={P.muted}
+                value={note}
+                onChangeText={setNote}
+                multiline
+              />
+              <View style={sheetStyles.quickChips}>
+                {['做得很好！', '下次再仔細一點', '👍', '👏', '要重做喔'].map((c) => (
+                  <Pressable
+                    key={c}
+                    onPress={() => setNote(c)}
+                    style={sheetStyles.quickChip}
+                  >
+                    <Label style={{ color: P.primary, fontSize: 11 }}>{c}</Label>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {(item.instance.submissionCount || 0) > 1 && (
+              <Muted style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+                第 {item.instance.submissionCount}/3 次
+              </Muted>
+            )}
+          </ScrollView>
+
+          {/* 底部双按鈕 */}
+          <View style={sheetStyles.footerRow}>
+            <Pressable onPress={handleReject} style={sheetStyles.rejectBtn}>
+              <Label style={{ color: P.accentHot, fontSize: 14 }}>↺ 再試一次</Label>
+            </Pressable>
+            <Pressable onPress={handleApprove} style={sheetStyles.approveBtn}>
+              <RoughStar size={14} color={P.bg} glow={false} />
+              <Label style={{ color: P.bg, marginLeft: 6, fontSize: 14, fontWeight: '800' }}>
+                通過 +★ {item.taskPoints}
+              </Label>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
-    </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// =============================================================================
+// Redeem Confirm Sheet — spec 4.4
+// =============================================================================
+function RedeemConfirmSheet({
+  order,
+  familyId,
+  uid,
+  onClose,
+}: {
+  order: ReviewOrder | null;
+  familyId: string | undefined;
+  uid: string | undefined;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const [balance, setBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!order) {
+      setNote('');
+      setBalance(null);
+      return;
+    }
+    if (!familyId) return;
+    firestore()
+      .collection('pointWallets')
+      .doc(`${familyId}_${order.order.userId}`)
+      .get()
+      .then((d) => setBalance(d.data()?.balance ?? null))
+      .catch(() => setBalance(null));
+  }, [order, familyId]);
+
+  if (!order) return null;
+
+  const handleApprove = async () => {
+    await firestore()
+      .collection('rewardOrders')
+      .doc(order.order.id)
+      .update({
+        status: 'approved',
+        approvedAt: firestore.FieldValue.serverTimestamp(),
+        ...(note.trim() ? { parentNote: note.trim() } : {}),
+      });
+    Keyboard.dismiss();
+    onClose();
+  };
+
+  const handleReject = async () => {
+    if (!note.trim()) {
+      // 留言必填（spec 4.4 提到）
+      return;
+    }
+    await firestore()
+      .collection('rewardOrders')
+      .doc(order.order.id)
+      .update({
+        status: 'rejected',
+        parentNote: note.trim(),
+      });
+    Keyboard.dismiss();
+    onClose();
+  };
+
+  const cost = order.order.pointCostSnapshot;
+  const afterBalance = balance != null ? balance - cost : null;
+
+  return (
+    <Modal
+      visible={!!order}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={sheetStyles.root} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={20}
+        >
+          <View style={sheetStyles.dragBar} />
+          <View style={sheetStyles.topRow}>
+            <View style={{ width: 32 }} />
+            <View />
+            <Pressable onPress={onClose} hitSlop={10} style={sheetStyles.closeBtn}>
+              <Body style={{ color: P.muted, fontSize: 22 }}>✕</Body>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 16 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={sheetStyles.header}>
+              <H3 style={[sheetStyles.taskTitle, { fontSize: 24 }]}>
+                {order.childName} 想要換…
+              </H3>
+            </View>
+
+            {/* 反白卡片（surfaceCream） */}
+            <View style={sheetStyles.creamCard}>
+              <View style={sheetStyles.rewardIcon}>
+                <Body style={{ fontSize: 52 }}>
+                  {order.item?.emoji || rewardEmoji(order.item?.title || '')}
+                </Body>
+              </View>
+              <H3 style={sheetStyles.rewardName}>{order.item?.title || '—'}</H3>
+              <Data style={sheetStyles.rewardCost}>− ★ {cost}</Data>
+
+              {/* 星光對比 */}
+              <View style={sheetStyles.balanceRow}>
+                <View style={sheetStyles.balancePill}>
+                  <Label style={{ color: '#8A8275', fontSize: 10 }}>現在</Label>
+                  <Data style={{ color: '#1C1A14', fontSize: 16, fontWeight: '700' }}>
+                    ★ {balance ?? '—'}
+                  </Data>
+                </View>
+                <Body style={{ fontSize: 18, color: '#8A8275' }}>→</Body>
+                <View style={sheetStyles.balancePill}>
+                  <Label style={{ color: '#8A8275', fontSize: 10 }}>之後</Label>
+                  <Data
+                    style={{
+                      fontSize: 16,
+                      fontWeight: '700',
+                      color: afterBalance != null && afterBalance < 0 ? P.accentHot : '#1C1A14',
+                    }}
+                  >
+                    ★ {afterBalance ?? '—'}
+                  </Data>
+                </View>
+              </View>
+            </View>
+
+            {/* 留言（婉拒時必填） */}
+            <View style={sheetStyles.replyCard}>
+              <Label style={{ color: P.muted, fontSize: 11, marginBottom: 8 }}>
+                寫點什麼（婉拒時必填）
+              </Label>
+              <TextInput
+                style={sheetStyles.replyInput}
+                placeholder="例：好啊！記得收拾"
+                placeholderTextColor={P.muted}
+                value={note}
+                onChangeText={setNote}
+                multiline
+              />
+              <View style={sheetStyles.quickChips}>
+                {['好啊！', '今天再說', '寫完功課再說', '不行，太多了'].map((c) => (
+                  <Pressable
+                    key={c}
+                    onPress={() => setNote(c)}
+                    style={[sheetStyles.quickChip, { backgroundColor: `${P.accent}38` }]}
+                  >
+                    <Label style={{ color: P.accent, fontSize: 11 }}>{c}</Label>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
+
+          <View style={sheetStyles.footerRow}>
+            <Pressable
+              onPress={handleReject}
+              disabled={!note.trim()}
+              style={[sheetStyles.declineBtn, !note.trim() && { opacity: 0.5 }]}
+            >
+              <Label style={{ color: P.text, fontSize: 14 }}>晚點再說</Label>
+            </Pressable>
+            <Pressable onPress={handleApprove} style={[sheetStyles.approveBtn, { flex: 2 }]}>
+              <Label style={{ color: P.bg, fontSize: 14, fontWeight: '800' }}>
+                好，答應她
+              </Label>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -543,6 +745,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  rowBetween: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   childRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -554,77 +762,200 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  rowBetween: {
+});
+
+const sheetStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: P.bg,
+  },
+  dragBar: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: P.border,
+    marginTop: 8,
+  },
+  topRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
   },
-  expandBody: {
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: P.border,
+  closeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  expandPhoto: {
-    width: '100%',
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  childAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  taskTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  photoBox: {
+    marginHorizontal: spacing.lg,
     aspectRatio: 4 / 3,
-    borderRadius: radius.md,
+    borderRadius: 16,
+    backgroundColor: '#8A7A54',
+    overflow: 'hidden',
+    position: 'relative',
     marginBottom: spacing.md,
-    backgroundColor: P.surfaceHi,
   },
-  noteInput: {
-    padding: 12,
-    borderRadius: radius.md,
+  photoFallback: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#8A7A54',
+  },
+  photoEmoji: {
+    position: 'absolute',
+    right: 14,
+    top: 14,
+  },
+  photoStamp: {
+    position: 'absolute',
+    left: 12,
+    bottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  noteCard: {
+    marginHorizontal: spacing.lg,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: P.surface,
     borderWidth: 1,
     borderColor: P.border,
+    marginBottom: spacing.md,
+  },
+  replyCard: {
+    marginHorizontal: spacing.lg,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  replyInput: {
     backgroundColor: P.bg,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: P.border,
+    padding: 12,
     color: P.text,
     fontSize: 14,
     minHeight: 60,
+    textAlignVertical: 'top',
   },
   quickChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginTop: 8,
+    marginTop: 10,
   },
   quickChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: radius.full,
-    backgroundColor: `${P.primary}18`,
-    borderWidth: 1,
-    borderColor: P.border,
+    backgroundColor: `${P.primary}38`,
   },
-  inlineActions: {
+  footerRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: spacing.md,
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  rejectBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.accentHot,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   approveBtn: {
     flex: 1.5,
-    paddingVertical: 13,
+    paddingVertical: 14,
     borderRadius: radius.full,
     backgroundColor: P.primary,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
+    shadowColor: P.primary,
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
   },
-  rejectBtn: {
+  declineBtn: {
     flex: 1,
-    paddingVertical: 13,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: P.accentHot,
-    alignItems: 'center',
-  },
-  cancelBtn: {
-    flex: 1,
-    paddingVertical: 13,
+    paddingVertical: 14,
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: P.border,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creamCard: {
+    marginHorizontal: spacing.lg,
+    padding: 22,
+    borderRadius: 22,
+    backgroundColor: P.surfaceCream,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  rewardIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 22,
+    backgroundColor: `${P.primary}55`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  rewardName: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1C1A14',
+  },
+  rewardCost: {
+    marginTop: 6,
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1C1A14',
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  balancePill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(28,26,20,0.06)',
+    alignItems: 'center',
+    minWidth: 80,
   },
 });
