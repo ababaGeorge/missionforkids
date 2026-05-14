@@ -680,49 +680,108 @@ function Celebrate({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const uid = auth().currentUser?.uid;
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!uid || !task.familyId) return;
+    const unsub = firestore()
+      .collection('pointWallets')
+      .where('userId', '==', uid)
+      .where('familyId', '==', task.familyId)
+      .limit(1)
+      .onSnapshot((snap) => {
+        if (snap && !snap.empty) {
+          setWalletBalance(snap.docs[0].data().balance || 0);
+        }
+      });
+    return unsub;
+  }, [uid, task.familyId]);
 
   const goRewards = () => {
     router.replace('/child/(tabs)/rewards' as any);
   };
 
+  // If wallet balance is loaded, show cumulative total (balance already includes this award).
+  // Otherwise just show this award.
+  const showTotal = walletBalance !== null && walletBalance >= pointsAwarded;
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: P.bg }]} edges={['top', 'bottom']}>
-      <Starfield count={70} />
+      <Starfield count={50} />
       <View style={styles.celebGlow} pointerEvents="none" />
+      {/* Scatter deco stars */}
+      <Text style={[celebStyles.decoStar, { top: 90, left: 40, fontSize: 18 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { top: 130, left: 100, fontSize: 14 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { top: 180, left: 60, fontSize: 12 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { top: 220, right: 60, fontSize: 18 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { top: 320, right: 50, fontSize: 14 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { top: 380, right: 110, fontSize: 12 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { bottom: 320, left: 80, fontSize: 16 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { bottom: 280, left: 140, fontSize: 12 }]}>★</Text>
+      <Text style={[celebStyles.decoStar, { bottom: 240, right: 90, fontSize: 18 }]}>★</Text>
+
       <View style={styles.celebBody}>
-        <Body style={{ fontSize: 88 }}>🎉</Body>
-        <Display style={{ fontSize: 32, marginTop: spacing.md, textAlign: 'center' }}>
+        {/* Big star with +N overlay */}
+        <View style={celebStyles.bigStarWrap}>
+          <Text style={celebStyles.bigStarGlyph}>★</Text>
+          <Text style={celebStyles.bigStarText}>+{pointsAwarded}</Text>
+        </View>
+        <Display style={{ fontSize: 36, marginTop: spacing.lg, textAlign: 'center' }}>
           做得好！
         </Display>
-        <Muted style={{ marginTop: spacing.sm, fontSize: 15 }}>{task.title}</Muted>
-        <View style={styles.celebPill}>
-          <RoughStar size={22} />
-          <Data
-            style={{
-              color: P.primary,
-              fontSize: 22,
-              marginLeft: spacing.sm,
-              fontWeight: '700',
-            }}
-          >
-            +{pointsAwarded}
-          </Data>
-        </View>
+        <Muted style={{ marginTop: 8, fontSize: 14 }}>
+          {showTotal ? (
+            <>
+              總星光 <Text style={{ color: P.primary }}>★ {walletBalance}</Text>
+            </>
+          ) : (
+            <>+{pointsAwarded} 顆星，加進你的天空</>
+          )}
+        </Muted>
       </View>
       <View style={styles.footerBar}>
         <Pressable onPress={goRewards} style={styles.secondaryBtn}>
           <Label style={{ color: P.muted }}>看獎勵</Label>
         </Pressable>
         <Pressable onPress={onClose} style={[styles.primaryBtn, { flex: 1 }]}>
-          <RoughStar size={16} color={P.bg} glow={false} />
-          <Label style={{ color: P.bg, fontSize: 15, marginLeft: 8 }}>
-            下一個任務
+          <Label style={{ color: P.bg, fontSize: 15, fontWeight: '800' }}>
+            下一個 →
           </Label>
         </Pressable>
       </View>
     </SafeAreaView>
   );
 }
+
+const celebStyles = StyleSheet.create({
+  decoStar: {
+    position: 'absolute',
+    color: '#F7C928',
+  },
+  bigStarWrap: {
+    width: 180,
+    height: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  bigStarGlyph: {
+    position: 'absolute',
+    fontSize: 180,
+    color: '#F7C928',
+    lineHeight: 180,
+    textShadowColor: 'rgba(247,201,40,0.5)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 30,
+  },
+  bigStarText: {
+    fontSize: 40,
+    fontWeight: '800',
+    color: '#1B2236',
+    zIndex: 10,
+  },
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: P.bg },

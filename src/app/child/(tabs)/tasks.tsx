@@ -390,8 +390,8 @@ function TaskCard({
 
   return (
     <Pressable
-      onPress={isDone ? undefined : onPress}
-      disabled={isDone}
+      onPress={isDone && !__DEV__ ? undefined : onPress}
+      disabled={isDone && !__DEV__}
       style={({ pressed }) => [
         styles.card,
         isDone && { opacity: 0.55 },
