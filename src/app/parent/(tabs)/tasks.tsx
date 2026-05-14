@@ -54,6 +54,23 @@ const emojiFor = (title: string): string => {
   return '✦';
 };
 
+const freqLabel = (f?: string): string => {
+  switch (f) {
+    case 'daily': return '每天';
+    case 'weekly': return '每週';
+    case 'monthly': return '每月';
+    case 'once': return '單次';
+    default: return '';
+  }
+};
+
+const CHILD_PALETTE = ['#F5A623', '#5EE0A8', '#6FA9E8', '#8B7ED8', '#FF6B47', '#FFD966'] as const;
+const childColorFor = (userId: string): string => {
+  let h = 0;
+  for (let i = 0; i < userId.length; i++) h = (h * 31 + userId.charCodeAt(i)) >>> 0;
+  return CHILD_PALETTE[h % CHILD_PALETTE.length];
+};
+
 const fmtWhen = (ts: any): string => {
   if (!ts) return '—';
   const d: Date = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
@@ -210,7 +227,7 @@ export default function ParentTasks() {
         <View style={styles.header}>
           <Label color={P.muted}>任務</Label>
           <Display style={{ marginTop: 2 }}>
-            {tab === 'manage' ? `${activeCount} 個在跑` : '任務歷程'}
+            {tab === 'manage' ? `${activeCount} 個任務在跑` : '過去 7 天'}
           </Display>
 
           <View style={styles.segment}>
@@ -291,14 +308,23 @@ export default function ParentTasks() {
                           </Data>
                         </View>
                         <BodySm style={{ color: P.muted, marginTop: 2, fontSize: 11 }}>
-                          {tw.instances
-                            .map((i) => childNameFor(i.userId))
-                            .filter(Boolean)
-                            .filter((v, i, a) => a.indexOf(v) === i)
-                            .join(' · ') || '未指派'}
+                          {(() => {
+                            const names = tw.instances
+                              .map((i) => childNameFor(i.userId))
+                              .filter(Boolean)
+                              .filter((v, i, a) => a.indexOf(v) === i)
+                              .join('、') || '未指派';
+                            const freq = freqLabel(tw.task.frequency);
+                            return freq ? `${names} · ${freq}` : names;
+                          })()}
                         </BodySm>
-                        <View style={styles.progressTrack}>
-                          <View style={[styles.progressFill, { width: `${pct * 100}%` as any }]} />
+                        <View style={styles.progressRow}>
+                          <View style={styles.progressTrack}>
+                            <View style={[styles.progressFill, { width: `${pct * 100}%` as any }]} />
+                          </View>
+                          <Data style={styles.progressText}>
+                            {approved}/{total || 0}
+                          </Data>
                         </View>
                         <View style={styles.instanceRow}>
                           {tw.instances.slice(0, 4).map((inst) => (
@@ -311,6 +337,13 @@ export default function ParentTasks() {
                           )}
                         </View>
                       </View>
+                      <Pressable
+                        onPress={() => handleArchiveTask(tw.task.id)}
+                        hitSlop={8}
+                        style={styles.moreBtn}
+                      >
+                        <Label style={styles.moreLabel}>⋯</Label>
+                      </Pressable>
                     </View>
                   </Pressable>
                 );
@@ -373,14 +406,22 @@ export default function ParentTasks() {
                       <H3 style={{ fontSize: 14 }} numberOfLines={1}>
                         {task.title}
                       </H3>
-                      <Muted style={{ fontSize: 11, marginTop: 2 }}>
-                        {childNameFor(instance.userId)} · {fmtWhen(instance.reviewedAt)}
-                      </Muted>
+                      <View style={styles.historyMetaRow}>
+                        <View
+                          style={[
+                            styles.childDot,
+                            { backgroundColor: childColorFor(instance.userId) },
+                          ]}
+                        />
+                        <Muted style={{ fontSize: 11 }}>
+                          {childNameFor(instance.userId)} · {fmtWhen(instance.reviewedAt)}
+                        </Muted>
+                      </View>
                     </View>
                     <Data
                       style={{
                         color: instance.status === 'approved' ? P.primary : P.muted,
-                        fontSize: 14,
+                        fontSize: 15,
                         fontWeight: '700',
                       }}
                     >
@@ -773,9 +814,9 @@ const styles = StyleSheet.create({
     backgroundColor: P.primary,
   },
   taskCard: {
-    padding: spacing.md,
+    padding: 14,
     backgroundColor: P.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: P.border,
     marginBottom: spacing.sm,
@@ -783,12 +824,35 @@ const styles = StyleSheet.create({
   iconBox: {
     width: 40,
     height: 40,
-    borderRadius: radius.md,
-    backgroundColor: `${P.primary}18`,
+    borderRadius: 10,
+    backgroundColor: `${P.primary}2E`,
     borderWidth: 1,
     borderColor: P.border,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  moreBtn: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -2,
+  },
+  moreLabel: {
+    fontSize: 16,
+    color: P.muted,
+    fontWeight: '700',
+  },
+  historyMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  childDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   rowBetween: {
     flexDirection: 'row',
@@ -809,7 +873,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: P.border,
-    backgroundColor: P.surfaceHi,
+    backgroundColor: 'transparent',
   },
   filterPillOn: {
     backgroundColor: P.primary,
@@ -823,17 +887,30 @@ const styles = StyleSheet.create({
   filterPillLabelOn: {
     color: P.bg,
   },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
   progressTrack: {
+    flex: 1,
     height: 4,
     borderRadius: radius.full,
     backgroundColor: P.surfaceHi,
     overflow: 'hidden',
-    marginTop: 6,
   },
   progressFill: {
     height: '100%',
     backgroundColor: P.green,
     borderRadius: radius.full,
+  },
+  progressText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: P.muted,
+    minWidth: 32,
+    textAlign: 'right',
   },
   historyStats: {
     flexDirection: 'row',
