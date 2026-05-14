@@ -12,6 +12,7 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
@@ -45,6 +46,7 @@ type InviteRow = {
 };
 
 export default function FamilyScreen() {
+  const router = useRouter();
   const uid = auth().currentUser?.uid;
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -490,7 +492,10 @@ export default function FamilyScreen() {
             </Pressable>
           ))}
           <Pressable
-            onPress={() => auth().signOut()}
+            onPress={async () => {
+              try { await auth().signOut(); } catch {}
+              router.replace('/auth/sign-in');
+            }}
             style={styles.settingRow}
           >
             <Body style={{ fontSize: 14, fontWeight: '700', color: P.accentHot }}>登出</Body>
