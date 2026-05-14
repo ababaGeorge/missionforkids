@@ -63,7 +63,7 @@ export default function ChildRewards() {
       .onSnapshot((snap) => {
         if (!snap) return;
         if (!snap.empty) setFamilyId(snap.docs[0].data().familyId);
-      }, (err) => console.error('[ChildRewards] membership error:', (err as any)?.code));
+      }, (err) => console.warn('[ChildRewards] membership error:', (err as any)?.code));
     return unsub;
   }, [uid]);
 
@@ -79,7 +79,7 @@ export default function ChildRewards() {
         if (!snap.empty) {
           setWallet({ id: snap.docs[0].id, ...snap.docs[0].data() } as PointWallet);
         }
-      }, (err) => console.error('[ChildRewards] wallet error:', (err as any)?.code));
+      }, (err) => console.warn('[ChildRewards] wallet error:', (err as any)?.code));
     return unsub;
   }, [uid, familyId]);
 
@@ -92,7 +92,7 @@ export default function ChildRewards() {
       .onSnapshot((snap) => {
         if (!snap) return;
         setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RewardItem)));
-      }, (err) => console.error('[ChildRewards] items error:', (err as any)?.code));
+      }, (err) => console.warn('[ChildRewards] items error:', (err as any)?.code));
     return unsub;
   }, [familyId]);
 
@@ -102,12 +102,19 @@ export default function ChildRewards() {
       .collection('rewardOrders')
       .where('userId', '==', uid)
       .where('familyId', '==', familyId)
-      .orderBy('createdAt', 'desc')
       .limit(20)
       .onSnapshot((snap) => {
         if (!snap) return;
-        setOrders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RewardOrder)));
-      }, (err) => console.error('[ChildRewards] orders error:', (err as any)?.code));
+        const list = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() } as RewardOrder)
+        );
+        list.sort((a, b) => {
+          const at = (a as any).createdAt?.toMillis?.() || 0;
+          const bt = (b as any).createdAt?.toMillis?.() || 0;
+          return bt - at;
+        });
+        setOrders(list);
+      }, (err) => console.warn('[ChildRewards] orders error:', (err as any)?.code));
     return unsub;
   }, [uid, familyId]);
 
@@ -236,7 +243,9 @@ export default function ChildRewards() {
                       ]}
                     >
                       <View style={styles.rewardEmojiBox}>
-                        <BodySm style={{ fontSize: 26 }}>{rewardEmoji(r.title)}</BodySm>
+                        <Text style={{ fontSize: 30, lineHeight: 36 }}>
+                          {r.emoji || rewardEmoji(r.title)}
+                        </Text>
                       </View>
                       <H3
                         numberOfLines={2}

@@ -90,6 +90,40 @@ async function seedDevTasks(familyId: string, childUid: string) {
     );
   }
   await batch.commit();
+  await seedDevRewards(familyId, childUid);
+}
+
+async function seedDevRewards(familyId: string, childUid: string) {
+  const sv = firestore.FieldValue.serverTimestamp();
+  type RewardSeed = { id: string; title: string; pointCost: number; emoji: string };
+  const rewards: RewardSeed[] = [
+    { id: 'dev-reward-ice', title: '吃冰淇淋', pointCost: 50, emoji: '🍦' },
+    { id: 'dev-reward-game', title: '遊戲 30 分鐘', pointCost: 30, emoji: '🎮' },
+    { id: 'dev-reward-movie', title: '選電影', pointCost: 100, emoji: '🎬' },
+    { id: 'dev-reward-book', title: '新的書', pointCost: 200, emoji: '📖' },
+    { id: 'dev-reward-latenight', title: '晚睡 30 分鐘', pointCost: 80, emoji: '🌙' },
+    { id: 'dev-reward-lego', title: '樂高', pointCost: 500, emoji: '🧱' },
+  ];
+  const batch = firestore().batch();
+  for (const r of rewards) {
+    batch.set(
+      firestore().collection('rewardItems').doc(r.id),
+      {
+        familyId,
+        title: r.title,
+        description: null,
+        pointCost: r.pointCost,
+        itemType: 'physical',
+        emoji: r.emoji,
+        imageUrl: null,
+        status: 'active',
+        createdBy: childUid,
+        createdAt: sv,
+      },
+      { merge: true }
+    );
+  }
+  await batch.commit();
 }
 
 export default function SignIn() {
