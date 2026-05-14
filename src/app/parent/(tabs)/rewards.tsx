@@ -6,12 +6,10 @@ import {
   Pressable,
   Modal,
   TextInput,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
   TouchableWithoutFeedback,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
@@ -31,8 +29,18 @@ import {
   Data,
 } from '../../../design/Text';
 
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - spacing.lg * 2 - 10) / 2;
+const REWARD_COLORS = ['#FFD966', '#F5A623', '#5EE0A8', '#6FA9E8', '#8B7ED8', '#FF6B47'] as const;
+const colorForReward = (id: string): string => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return REWARD_COLORS[h % REWARD_COLORS.length];
+};
+
+const fmtMonth = (ts: any): string => {
+  if (!ts) return '—';
+  const d: Date = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+};
 
 const EMOJI_CHOICES = [
   '🎁', '🍦', '🎮', '🎬', '📖', '🧸', '🍕', '🌙', '🎨', '⚽', '🎧', '💰',
@@ -61,6 +69,8 @@ export default function ParentRewards() {
   const [items, setItems] = useState<RewardItem[]>([]);
   const [orders, setOrders] = useState<OrderWithChild[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [tab, setTab] = useState<'catalog' | 'log'>('catalog');
+  const [editingItem, setEditingItem] = useState<RewardItem | null>(null);
 
   useEffect(() => {
     if (!uid) return;
@@ -96,8 +106,8 @@ export default function ParentRewards() {
     const unsub = firestore()
       .collection('rewardOrders')
       .where('familyId', '==', familyId)
-      .where('status', 'in', ['pending', 'approved', 'delivered'])
       .orderBy('createdAt', 'desc')
+      .limit(50)
       .onSnapshot(async (snap) => {
         if (!snap) return;
         const list: OrderWithChild[] = [];
@@ -136,6 +146,22 @@ export default function ParentRewards() {
     });
   };
 
+  const monthStats = useMemo(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const inMonth = orders.filter((o) => {
+      const t = (o.order.createdAt as any)?.toMillis?.() || 0;
+      return t >= monthStart;
+    });
+    const done = inMonth.filter((o) =>
+      ['delivered', 'completed', 'approved'].includes(o.order.status)
+    ).length;
+    const points = inMonth
+      .filter((o) => ['delivered', 'completed', 'approved'].includes(o.order.status))
+      .reduce((s, o) => s + (o.order.pointCostSnapshot || 0), 0);
+    return { done, points };
+  }, [orders]);
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Starfield count={12} />
@@ -145,104 +171,157 @@ export default function ParentRewards() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <Label color={P.muted}>禮物</Label>
-          <Display style={{ marginTop: 2 }}>{items.length} 個可以換</Display>
-        </View>
+          <Label color={P.muted}>獎勵</Label>
+          <Display style={{ marginTop: 2 }}>管理與紀錄</Display>
 
-        <View style={styles.section}>
-          {items.length === 0 ? (
-            <Empty emoji="🎁" title="還沒有禮物" body="點右下角 + 新增一個" />
-          ) : (
-            <View style={styles.grid}>
-              {items.map((r) => (
-                <View key={r.id} style={styles.card}>
-                  <View style={styles.cardEmoji}>
-                    <Body style={{ fontSize: 26 }}>{rewardEmoji(r.title)}</Body>
-                  </View>
-                  <H3 style={{ marginTop: 10, fontSize: 14 }}>{r.title}</H3>
-                  <View style={styles.costRow}>
-                    <RoughStar size={12} glow={false} />
-                    <Data
-                      style={{
-                        marginLeft: 4,
-                        color: P.primary,
-                        fontSize: 13,
-                        fontWeight: '700',
-                      }}
-                    >
-                      {r.pointCost}
-                    </Data>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {orders.length > 0 && (
-          <View style={styles.section}>
-            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
-              兌換紀錄
-            </Label>
-            {orders.map((o) => {
-              const isDeliverable = o.order.status === 'approved';
-              const statusLabel =
-                o.order.status === 'pending'
-                  ? '⏳ 等你確認（請到審核）'
-                  : o.order.status === 'approved'
-                  ? '✓ 準備交付'
-                  : '🎊 已交付';
+          <View style={styles.segment}>
+            {(['catalog', 'log'] as const).map((k) => {
+              const on = tab === k;
               return (
-                <View key={o.order.id} style={styles.orderRow}>
-                  <Body style={{ fontSize: 22 }}>
-                    {rewardEmoji(o.itemTitle)}
-                  </Body>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <H3 style={{ fontSize: 14 }}>{o.itemTitle || '—'}</H3>
-                    <Muted style={{ fontSize: 11, marginTop: 2 }}>
-                      {o.childName} · {statusLabel}
-                    </Muted>
-                  </View>
-                  <Data
+                <Pressable
+                  key={k}
+                  onPress={() => setTab(k)}
+                  style={[styles.segmentItem, on && styles.segmentItemOn]}
+                >
+                  <Label
                     style={{
-                      color: P.muted,
-                      fontSize: 13,
-                      fontWeight: '700',
-                      marginRight: isDeliverable ? 12 : 0,
+                      color: on ? P.bg : P.muted,
+                      fontSize: 12,
                     }}
                   >
-                    −★ {o.order.pointCostSnapshot}
-                  </Data>
-                  {isDeliverable && (
-                    <Pressable
-                      onPress={() => handleDeliverOrder(o.order.id)}
-                      style={styles.deliverBtn}
-                    >
-                      <Label style={{ color: P.bg, fontSize: 11 }}>
-                        已交付
-                      </Label>
-                    </Pressable>
-                  )}
-                </View>
+                    {k === 'catalog' ? '禮物目錄' : '兌換紀錄'}
+                  </Label>
+                </Pressable>
               );
             })}
           </View>
-        )}
+        </View>
+
+        <View style={styles.section}>
+          {tab === 'catalog' ? (
+            items.length === 0 ? (
+              <>
+                <Empty emoji="🎁" title="還沒有禮物" body="點下方按鈕新增一個" />
+                <Pressable
+                  onPress={() => { setEditingItem(null); setShowCreate(true); }}
+                  style={styles.addDashed}
+                >
+                  <Label style={styles.addDashedLabel}>+ 新增禮物</Label>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {items.map((r) => {
+                  const color = colorForReward(r.id);
+                  return (
+                    <Pressable
+                      key={r.id}
+                      onPress={() => { setEditingItem(r); setShowCreate(true); }}
+                      style={styles.itemRow}
+                    >
+                      <View style={[styles.itemIcon, { backgroundColor: `${color}33`, borderColor: `${color}88` }]}>
+                        <Body style={{ fontSize: 22 }}>{r.emoji || rewardEmoji(r.title)}</Body>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <H3 style={{ fontSize: 14 }} numberOfLines={1}>{r.title}</H3>
+                        {r.description ? (
+                          <Muted style={{ fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+                            {r.description}
+                          </Muted>
+                        ) : null}
+                      </View>
+                      <View style={styles.itemRight}>
+                        <Data style={styles.itemPrice}>★ {r.pointCost}</Data>
+                        <Muted style={{ fontSize: 10, marginTop: 2 }}>編輯 →</Muted>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => { setEditingItem(null); setShowCreate(true); }}
+                  style={styles.addDashed}
+                >
+                  <Label style={styles.addDashedLabel}>+ 新增禮物</Label>
+                </Pressable>
+              </>
+            )
+          ) : (
+            // Redeem log
+            orders.length === 0 ? (
+              <Empty emoji="📜" title="還沒有兌換" body="小孩兌換禮物會出現在這。" />
+            ) : (
+              <>
+                {orders.map((o) => {
+                  const isDeliverable = o.order.status === 'approved';
+                  const statusInfo = (() => {
+                    switch (o.order.status) {
+                      case 'pending': return { text: '等你確認', color: P.accent };
+                      case 'approved': return { text: '準備交付', color: P.accent };
+                      case 'delivered': return { text: '已交付', color: P.green };
+                      case 'completed': return { text: '完成', color: P.green };
+                      case 'cancelled': return { text: '取消', color: P.muted };
+                      case 'rejected': return { text: '婉拒', color: P.accentHot };
+                      default: return { text: o.order.status, color: P.muted };
+                    }
+                  })();
+                  return (
+                    <View key={o.order.id} style={styles.logRow}>
+                      <View style={styles.logIcon}>
+                        <Body style={{ fontSize: 20 }}>{rewardEmoji(o.itemTitle)}</Body>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <H3 style={{ fontSize: 13 }} numberOfLines={1}>
+                          {o.itemTitle || '—'}
+                        </H3>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
+                          <Muted style={{ fontSize: 11 }}>
+                            {o.childName} · {fmtMonth(o.order.createdAt)} ·
+                          </Muted>
+                          <Label style={{ fontSize: 11, color: statusInfo.color, marginLeft: 4 }}>
+                            {statusInfo.text}
+                          </Label>
+                        </View>
+                      </View>
+                      <Data style={{ color: P.muted, fontSize: 13, fontWeight: '700' }}>
+                        − ★ {o.order.pointCostSnapshot}
+                      </Data>
+                      {isDeliverable && (
+                        <Pressable
+                          onPress={() => handleDeliverOrder(o.order.id)}
+                          style={styles.deliverBtn}
+                          hitSlop={6}
+                        >
+                          <Label style={{ color: P.bg, fontSize: 11 }}>已交付</Label>
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
+                <Muted style={styles.monthStats}>
+                  本月：{monthStats.done} 次 · − ★ {monthStats.points}
+                </Muted>
+              </>
+            )
+          )}
+        </View>
       </ScrollView>
 
-      <Pressable
-        onPress={() => setShowCreate(true)}
-        style={styles.fab}
-        hitSlop={10}
-      >
-        <Body style={{ color: P.bg, fontSize: 26, fontWeight: '800' }}>+</Body>
-      </Pressable>
+      {tab === 'catalog' && (
+        <Pressable
+          onPress={() => { setEditingItem(null); setShowCreate(true); }}
+          style={styles.fab}
+          hitSlop={10}
+        >
+          <Body style={{ color: P.bg, fontSize: 26, fontWeight: '800' }}>+</Body>
+        </Pressable>
+      )}
 
       <CreateRewardModal
         visible={showCreate}
-        onClose={() => setShowCreate(false)}
+        onClose={() => { setShowCreate(false); setEditingItem(null); }}
         familyId={familyId}
         uid={uid}
+        editing={editingItem}
       />
     </SafeAreaView>
   );
@@ -253,35 +332,62 @@ function CreateRewardModal({
   onClose,
   familyId,
   uid,
+  editing,
 }: {
   visible: boolean;
   onClose: () => void;
   familyId: string | null;
   uid: string | undefined;
+  editing?: RewardItem | null;
 }) {
   const [title, setTitle] = useState('');
   const [cost, setCost] = useState('50');
   const [emoji, setEmoji] = useState('🎁');
   const [itemType, setItemType] = useState<'physical' | 'virtual'>('physical');
 
+  useEffect(() => {
+    if (visible) {
+      if (editing) {
+        setTitle(editing.title);
+        setCost(String(editing.pointCost));
+        setEmoji(editing.emoji || '🎁');
+        setItemType(editing.itemType);
+      } else {
+        setTitle('');
+        setCost('50');
+        setEmoji('🎁');
+        setItemType('physical');
+      }
+    }
+  }, [visible, editing]);
+
   const handleCreate = async () => {
     if (!familyId || !uid || !title.trim()) return;
-    await firestore().collection('rewardItems').add({
-      familyId,
+    const payload = {
       title: title.trim(),
-      description: null,
       pointCost: parseInt(cost) || 50,
       itemType,
-      imageUrl: null,
       emoji,
-      status: 'active',
-      createdBy: uid,
-      createdAt: firestore.FieldValue.serverTimestamp(),
-    });
-    setTitle('');
-    setCost('50');
-    setEmoji('🎁');
-    setItemType('physical');
+    };
+    if (editing) {
+      await firestore().collection('rewardItems').doc(editing.id).update(payload);
+    } else {
+      await firestore().collection('rewardItems').add({
+        familyId,
+        description: null,
+        imageUrl: null,
+        status: 'active',
+        createdBy: uid,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        ...payload,
+      });
+    }
+    onClose();
+  };
+
+  const handleArchive = async () => {
+    if (!editing) return;
+    await firestore().collection('rewardItems').doc(editing.id).update({ status: 'archived' });
     onClose();
   };
 
@@ -301,7 +407,7 @@ function CreateRewardModal({
                   <Pressable onPress={onClose}>
                     <Label style={{ color: P.muted }}>取消</Label>
                   </Pressable>
-                  <H3 style={{ fontSize: 15 }}>新增禮物</H3>
+                  <H3 style={{ fontSize: 15 }}>{editing ? '編輯禮物' : '新增禮物'}</H3>
                   <Pressable
                     onPress={handleCreate}
                     disabled={!title.trim()}
@@ -412,6 +518,12 @@ function CreateRewardModal({
                     })}
                   </View>
                 </View>
+
+                {editing && (
+                  <Pressable onPress={handleArchive} style={modalStyles.archiveBtn}>
+                    <Label style={{ color: P.accentHot, fontSize: 12 }}>刪除這個禮物</Label>
+                  </Pressable>
+                )}
               </ScrollView>
             </View>
           </View>
@@ -425,44 +537,96 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: P.bg },
   scroll: { paddingBottom: 140 },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  section: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  card: {
-    width: CARD_WIDTH,
-    padding: spacing.md,
+  segment: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
     backgroundColor: P.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: P.border,
+    padding: 4,
   },
-  cardEmoji: {
+  segmentItem: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    borderRadius: 9,
+  },
+  segmentItemOn: {
+    backgroundColor: P.primary,
+  },
+  section: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    marginBottom: 8,
+    backgroundColor: P.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: P.border,
+    gap: 12,
+  },
+  itemIcon: {
     width: 48,
     height: 48,
-    borderRadius: radius.md,
-    backgroundColor: `${P.primary}22`,
+    borderRadius: 10,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  costRow: {
+  itemRight: {
+    alignItems: 'flex-end',
+  },
+  itemPrice: {
+    color: P.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  addDashed: {
+    padding: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: P.border,
+    borderRadius: radius.card,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  addDashedLabel: {
+    color: P.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  logRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
-  },
-  orderRow: {
-    padding: 12,
+    gap: 12,
+    padding: 14,
+    marginBottom: 8,
     backgroundColor: P.surface,
-    borderRadius: radius.md,
+    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: P.border,
-    marginBottom: 6,
-    flexDirection: 'row',
+  },
+  logIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#FFF1DE',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthStats: {
+    marginTop: 14,
+    textAlign: 'center',
+    fontSize: 11,
   },
   deliverBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: radius.full,
     backgroundColor: P.primary,
+    marginLeft: 8,
   },
   fab: {
     position: 'absolute',
@@ -618,5 +782,10 @@ const modalStyles = StyleSheet.create({
   typeBtnOn: {
     backgroundColor: P.primary,
     borderColor: P.primary,
+  },
+  archiveBtn: {
+    marginTop: spacing.md,
+    paddingVertical: 12,
+    alignItems: 'center',
   },
 });
