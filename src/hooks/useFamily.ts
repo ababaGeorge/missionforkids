@@ -20,7 +20,7 @@ export function useFamily(userId: string | undefined) {
       .where('status', '==', 'active')
       .limit(1)
       .onSnapshot(async (snap) => {
-        if (snap.empty) {
+        if (!snap || snap.empty) {
           setFamily(null);
           setMembership(null);
           setMembers([]);
@@ -62,6 +62,10 @@ export function useFamily(userId: string | undefined) {
       .where('familyId', '==', family.id)
       .where('status', '==', 'active')
       .onSnapshot((snap) => {
+        if (!snap) {
+          setMembers([]);
+          return;
+        }
         setMembers(
           snap.docs.map(
             (doc) => ({ id: doc.id, ...doc.data() } as FamilyMembership)
