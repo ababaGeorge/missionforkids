@@ -10,6 +10,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Text,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -208,6 +209,14 @@ export default function ChildTaskDetail() {
   }
 
   // pending or rejected → form
+  const freqLabel =
+    task.frequency === 'daily'
+      ? '每日任務'
+      : task.frequency === 'weekly'
+      ? '每週任務'
+      : '任務';
+  const maxedOut = (instance.submissionCount || 0) >= MAX_SUBMISSIONS;
+  const primaryAction = photoUri ? handleSubmit : handleTakePhoto;
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <Starfield count={20} />
@@ -216,12 +225,15 @@ export default function ChildTaskDetail() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-      {/* Sheet header */}
-      <View style={styles.sheetHeader}>
-        <View style={styles.sheetHandle} />
-        <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={10}>
-          <Body style={{ color: P.muted }}>✕</Body>
+      {/* Push nav header */}
+      <View style={styles.navHeader}>
+        <Pressable onPress={onClose} style={styles.backBtn} hitSlop={10}>
+          <Body style={{ color: P.text, fontSize: 26, lineHeight: 26 }}>‹</Body>
         </Pressable>
+        <Label color={P.muted} style={{ letterSpacing: 1.5, fontSize: 11 }}>
+          {freqLabel}
+        </Label>
+        <View style={{ width: 32 }} />
       </View>
       <ScrollView
         style={{ flex: 1 }}
@@ -229,18 +241,52 @@ export default function ChildTaskDetail() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Label color={P.muted}>任務</Label>
-        <View style={styles.titleRow}>
-          <View style={styles.iconBoxLarge}>
-            <Body style={{ fontSize: 34 }}>{emoji}</Body>
+        {/* Big illustration card */}
+        <View style={styles.illustrationCard}>
+          {photoUri ? (
+            <Image source={{ uri: photoUri }} style={styles.illustrationPhoto} />
+          ) : (
+            <>
+              <Text style={{ fontSize: 88, lineHeight: 100 }}>{emoji}</Text>
+              <View style={[styles.starDeco, { top: 18, right: 24 }]}>
+                <Text style={{ fontSize: 18, color: P.primary }}>★</Text>
+              </View>
+              <View style={[styles.starDeco, { bottom: 22, left: 22 }]}>
+                <Text style={{ fontSize: 13, color: P.primary }}>★</Text>
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* Title */}
+        <H2 style={{ marginTop: spacing.lg }}>{task.title}</H2>
+
+        {/* Chips */}
+        <View style={styles.chipRow}>
+          <View style={styles.chipGold}>
+            <Label style={{ color: P.bg, fontSize: 12, fontWeight: '800' }}>
+              ★ {task.points} 星光
+            </Label>
           </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <H2 numberOfLines={2}>{task.title}</H2>
-            <BodySm style={{ color: P.muted, marginTop: 2 }}>
-              做完 +★ {task.points}
-            </BodySm>
+          <View style={styles.chipDark}>
+            <Label style={{ color: P.muted, fontSize: 12 }}>今天</Label>
           </View>
         </View>
+
+        {/* Parent hint card */}
+        {task.parentHint ? (
+          <View style={styles.hintCard}>
+            <Body style={{ fontSize: 18, marginRight: 10 }}>🦉</Body>
+            <View style={{ flex: 1 }}>
+              <Label color={P.muted} style={{ fontSize: 10, letterSpacing: 1 }}>
+                媽媽的暗號
+              </Label>
+              <Body style={{ fontStyle: 'italic', marginTop: 2, color: P.text }}>
+                {`"${task.parentHint}"`}
+              </Body>
+            </View>
+          </View>
+        ) : null}
 
         {status === 'rejected' && (
           <View style={styles.rejectedBox}>
@@ -251,26 +297,15 @@ export default function ChildTaskDetail() {
           </View>
         )}
 
-        {(instance.submissionCount || 0) >= MAX_SUBMISSIONS ? (
+        {maxedOut && (
           <View style={styles.maxBox}>
             <Body>今天已經試 {MAX_SUBMISSIONS} 次了，明天再來吧。</Body>
           </View>
-        ) : (
-          <Pressable onPress={handleTakePhoto} style={styles.photoCard}>
-            {photoUri ? (
-              <>
-                <Image source={{ uri: photoUri }} style={styles.photoPreview} />
-                <View style={styles.retakeChip}>
-                  <Label style={{ color: P.text }}>點一下重拍</Label>
-                </View>
-              </>
-            ) : (
-              <>
-                <Body style={{ fontSize: 48 }}>📷</Body>
-                <H3 style={{ marginTop: spacing.sm }}>拍一張照給爸媽看</H3>
-                <Muted style={{ marginTop: 4 }}>點一下拍照</Muted>
-              </>
-            )}
+        )}
+
+        {photoUri && !maxedOut && (
+          <Pressable onPress={handleTakePhoto} style={styles.retakeRow}>
+            <Label style={{ color: P.muted, fontSize: 12 }}>點一下重拍</Label>
           </Pressable>
         )}
 
@@ -291,40 +326,35 @@ export default function ChildTaskDetail() {
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
-      <View style={styles.footerBar}>
-        <Pressable onPress={onClose} style={styles.secondaryBtn}>
-          <Label style={{ color: P.muted }}>晚點做</Label>
-        </Pressable>
-        <Pressable
-          onPress={handleSubmit}
-          disabled={!canSubmit || !photoUri || submitting}
-          style={[
-            styles.primaryBtn,
-            !photoUri && styles.primaryBtnDisabled,
-          ]}
-        >
-          {submitting ? (
-            <ActivityIndicator color={P.bg} />
-          ) : (
-            <>
-              <RoughStar
-                size={16}
-                color={photoUri ? P.bg : P.muted}
-                glow={false}
-              />
-              <Label
-                style={{
-                  color: photoUri ? P.bg : P.muted,
-                  fontSize: 15,
-                  marginLeft: 8,
-                }}
-              >
-                完成任務
-              </Label>
-            </>
-          )}
-        </Pressable>
-      </View>
+
+      {/* Footer: single gold CTA */}
+      {!maxedOut && (
+        <View style={styles.footerBar}>
+          <Pressable
+            onPress={primaryAction}
+            disabled={submitting || (photoUri && !canSubmit) || false}
+            style={styles.primaryCTA}
+          >
+            {submitting ? (
+              <ActivityIndicator color={P.bg} />
+            ) : photoUri ? (
+              <>
+                <RoughStar size={16} color={P.bg} glow={false} />
+                <Label style={{ color: P.bg, fontSize: 16, marginLeft: 8, fontWeight: '800' }}>
+                  完成任務
+                </Label>
+              </>
+            ) : (
+              <>
+                <Body style={{ fontSize: 18 }}>📷</Body>
+                <Label style={{ color: P.bg, fontSize: 16, marginLeft: 8, fontWeight: '800' }}>
+                  拍一張照片
+                </Label>
+              </>
+            )}
+          </Pressable>
+        </View>
+      )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -594,6 +624,92 @@ const styles = StyleSheet.create({
     backgroundColor: P.surfaceHi,
     shadowOpacity: 0,
     elevation: 0,
+  },
+  navHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,242,234,0.06)',
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  illustrationCard: {
+    marginTop: spacing.sm,
+    height: 240,
+    borderRadius: radius.xl,
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  illustrationPhoto: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  starDeco: {
+    position: 'absolute',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: spacing.sm,
+  },
+  chipGold: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+  },
+  chipDark: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  hintCard: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.card,
+    backgroundColor: `${P.primary}10`,
+    borderWidth: 1,
+    borderColor: P.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  retakeRow: {
+    marginTop: 6,
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  primaryCTA: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: P.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   waitBack: {
     backgroundColor: 'rgba(247,242,234,0.08)',

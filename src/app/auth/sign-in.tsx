@@ -38,13 +38,14 @@ async function seedDevTasks(familyId: string, childUid: string) {
     points: number;
     frequency: 'daily' | 'weekly';
     instanceStatus: 'pending' | 'submitted' | 'approved';
+    parentHint?: string;
   };
   const seeds: Seed[] = [
-    { id: 'dev-task-brush', title: '刷牙', points: 5, frequency: 'daily', instanceStatus: 'approved' },
-    { id: 'dev-task-desk', title: '整理書桌', points: 10, frequency: 'daily', instanceStatus: 'pending' },
+    { id: 'dev-task-brush', title: '刷牙', points: 5, frequency: 'daily', instanceStatus: 'approved', parentHint: '記得上下都要刷，至少兩分鐘喔' },
+    { id: 'dev-task-desk', title: '整理書桌', points: 10, frequency: 'daily', instanceStatus: 'pending', parentHint: '書本和鉛筆都要收好喔' },
     { id: 'dev-task-fish', title: '餵魚', points: 3, frequency: 'daily', instanceStatus: 'approved' },
-    { id: 'dev-task-homework', title: '寫作業', points: 15, frequency: 'daily', instanceStatus: 'submitted' },
-    { id: 'dev-task-trash', title: '倒垃圾', points: 20, frequency: 'weekly', instanceStatus: 'pending' },
+    { id: 'dev-task-homework', title: '寫作業', points: 15, frequency: 'daily', instanceStatus: 'submitted', parentHint: '不會的可以先跳過，最後再問' },
+    { id: 'dev-task-trash', title: '倒垃圾', points: 20, frequency: 'weekly', instanceStatus: 'pending', parentHint: '記得把袋口綁好再丟' },
     { id: 'dev-task-toys', title: '整理玩具', points: 15, frequency: 'weekly', instanceStatus: 'pending' },
   ];
 
@@ -66,6 +67,7 @@ async function seedDevTasks(familyId: string, childUid: string) {
         status: 'active',
         createdBy: childUid,
         createdAt: sv,
+        parentHint: s.parentHint || null,
       },
       { merge: true }
     );

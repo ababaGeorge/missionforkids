@@ -88,6 +88,7 @@ export interface Task {
   status: TaskStatus;
   createdBy: string;
   createdAt: Timestamp;
+  parentHint?: string | null;
 }
 
 export type TaskInstanceStatus =
