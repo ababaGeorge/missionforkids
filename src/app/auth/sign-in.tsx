@@ -261,6 +261,7 @@ export default function SignIn() {
       // Parent 清掉 parent + child 兩種 role；child 只清 child（不該動 parent 權限）。
       // 必須在 batch.commit() 後做，否則新 membership 還沒進 firestore，
       // isFamilyMember rule 會 reject 對其他 membership 的 update。
+      const removedUids: string[] = [];
       try {
         const staleSnap = await firestore()
           .collection('familyMemberships')
@@ -281,12 +282,95 @@ export default function SignIn() {
             u?.displayName === 'Dev Child';
           if (isDevUser) {
             cleanup.update(d.ref, { status: 'removed' });
+            removedUids.push(data.userId);
             cleanCount++;
           }
         }
         if (cleanCount > 0) await cleanup.commit();
       } catch (cleanErr) {
         console.warn('[handleDevSignIn] stale cleanup skip:', cleanErr);
+      }
+
+      // Parent 額外：清掉 stale dev users 留下的 orphan tasks / taskInstances / rewardItems / rewardOrders。
+      // Child 沒權限改別人的 tasks / rewards，跳過。
+      // Firestore 'in' query 上限 30 個值，超過時切批次。
+      if (role === 'parent' && removedUids.length > 0) {
+        try {
+          const chunks: string[][] = [];
+          for (let i = 0; i < removedUids.length; i += 30) {
+            chunks.push(removedUids.slice(i, i + 30));
+          }
+          let archivedCount = 0;
+          for (const ids of chunks) {
+            const ops = firestore().batch();
+            // tasks: createdBy 是 stale dev → archived
+            const tCreated = await firestore()
+              .collection('tasks')
+              .where('familyId', '==', DEV_FAMILY_ID)
+              .where('createdBy', 'in', ids)
+              .get();
+            tCreated.docs.forEach((d) => {
+              if (d.data().status === 'active') {
+                ops.update(d.ref, { status: 'archived' });
+                archivedCount++;
+              }
+            });
+            // tasks: assigneeUserId 是 stale dev → archived
+            const tAssigned = await firestore()
+              .collection('tasks')
+              .where('familyId', '==', DEV_FAMILY_ID)
+              .where('assigneeUserId', 'in', ids)
+              .get();
+            tAssigned.docs.forEach((d) => {
+              if (d.data().status === 'active') {
+                ops.update(d.ref, { status: 'archived' });
+                archivedCount++;
+              }
+            });
+            // taskInstances: userId 是 stale dev → 用 'missed' 隱藏（避免出現在 submitted/notif/history）
+            const insts = await firestore()
+              .collection('taskInstances')
+              .where('familyId', '==', DEV_FAMILY_ID)
+              .where('userId', 'in', ids)
+              .get();
+            insts.docs.forEach((d) => {
+              const s = d.data().status;
+              if (s !== 'missed') {
+                ops.update(d.ref, { status: 'missed' });
+                archivedCount++;
+              }
+            });
+            // rewardItems: createdBy 是 stale dev → archived
+            const rewards = await firestore()
+              .collection('rewardItems')
+              .where('familyId', '==', DEV_FAMILY_ID)
+              .where('createdBy', 'in', ids)
+              .get();
+            rewards.docs.forEach((d) => {
+              if (d.data().status === 'active') {
+                ops.update(d.ref, { status: 'archived' });
+                archivedCount++;
+              }
+            });
+            // rewardOrders: userId 是 stale dev → cancelled
+            const orders = await firestore()
+              .collection('rewardOrders')
+              .where('familyId', '==', DEV_FAMILY_ID)
+              .where('userId', 'in', ids)
+              .get();
+            orders.docs.forEach((d) => {
+              const s = d.data().status;
+              if (s !== 'cancelled' && s !== 'completed' && s !== 'rejected') {
+                ops.update(d.ref, { status: 'cancelled', cancelledAt: now });
+                archivedCount++;
+              }
+            });
+            await ops.commit();
+          }
+          console.log('[handleDevSignIn] orphan data archived:', archivedCount);
+        } catch (orphanErr) {
+          console.warn('[handleDevSignIn] orphan cleanup skip:', orphanErr);
+        }
       }
 
       if (role === 'child') {
