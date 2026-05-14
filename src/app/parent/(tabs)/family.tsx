@@ -492,9 +492,18 @@ export default function FamilyScreen() {
             </Pressable>
           ))}
           <Pressable
-            onPress={async () => {
-              try { await auth().signOut(); } catch {}
-              router.replace('/auth/sign-in');
+            onPress={() => {
+              Alert.alert('登出', '確定要登出嗎？', [
+                { text: '取消', style: 'cancel' },
+                {
+                  text: '確定',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try { await auth().signOut(); } catch {}
+                    router.replace('/auth/sign-in');
+                  },
+                },
+              ]);
             }}
             style={styles.settingRow}
           >
