@@ -31,6 +31,7 @@ const emojiFor = (title: string): string => {
   const t = title || '';
   if (/刷牙|牙/.test(t)) return '🦷';
   if (/書|讀|書桌/.test(t)) return '📚';
+  if (/作業|功課|寫|算|數學|考/.test(t)) return '📝';
   if (/洗|澡/.test(t)) return '🛁';
   if (/垃圾|倒|清/.test(t)) return '🧹';
   if (/衣|服/.test(t)) return '👕';
@@ -375,6 +376,7 @@ export default function ChildTaskDetail() {
           onShutter={launchNativeCamera}
         />
       )}
+      {submitting && <SendingOverlay />}
     </SafeAreaView>
   );
 }
@@ -558,39 +560,113 @@ function Wait({
   submittedAt: any;
   onClose: () => void;
 }) {
+  const router = useRouter();
+  const goRewards = () => router.replace('/child/(tabs)/rewards' as any);
+  const fmtTime = (ts: any): string => {
+    if (!ts) return '剛剛';
+    const d: Date = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+  };
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <Starfield count={60} />
-      <View style={styles.waitBody}>
-        {/* Pip with dashed ring */}
-        <View style={styles.pipRing}>
-          <View style={styles.pipRingInner}>
-            <Text style={{ fontSize: 96, lineHeight: 110 }}>🦉</Text>
-          </View>
+      <Starfield count={28} />
+      <View style={styles.waitTopHeader}>
+        <View style={{ width: 32 }} />
+        <View style={styles.waitHandleWrap}>
+          <View style={styles.sheetHandle} />
+          <Muted style={{ fontSize: 11, marginTop: 4 }}>下滑關閉 · 或點 ✕</Muted>
         </View>
-        <Display style={{ textAlign: 'center', marginTop: spacing.lg }}>
-          星光正在傳送…
-        </Display>
-        <Muted style={{ marginTop: 10, textAlign: 'center', maxWidth: 280 }}>
-          Pip 正在幫你把今天的成果送出去
-        </Muted>
-        {/* Dot loading */}
-        <View style={styles.dotRow}>
-          <View style={styles.dot} />
-          <View style={styles.dot} />
-          <View style={styles.dot} />
-        </View>
-        {/* Minimal task summary line */}
-        <BodySm style={{ color: P.muted, marginTop: spacing.lg }}>
-          {task.title} · {emoji} · ★ {task.points} · {fmtWhen(submittedAt)}
-        </BodySm>
+        <Pressable onPress={onClose} style={styles.closeRound} hitSlop={10}>
+          <Text style={{ color: P.text, fontSize: 16 }}>✕</Text>
+        </Pressable>
       </View>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Delivered chip */}
+        <View style={styles.deliveredChip}>
+          <Text style={{ fontSize: 12, color: P.primary }}>✨</Text>
+          <Label
+            style={{ marginLeft: 6, color: P.primary, fontSize: 12, fontWeight: '700' }}
+          >
+            星光已送達
+          </Label>
+        </View>
+        {/* Headline */}
+        <Display style={{ marginTop: spacing.md }}>等爸媽看看你做得多棒</Display>
+        <Muted style={{ marginTop: 6, fontSize: 13 }}>
+          星光先幫你保留著，看過就會變亮
+        </Muted>
+        {/* Big illustration with delivered tag */}
+        <View style={styles.illustrationCard}>
+          <View style={styles.deliveredTag}>
+            <Label style={{ color: P.primary, fontSize: 11, fontWeight: '700' }}>
+              ✓ 送達
+            </Label>
+          </View>
+          <Text style={{ fontSize: 88, lineHeight: 100 }}>{emoji}</Text>
+        </View>
+        {/* Task summary card */}
+        <View style={styles.deliveredTaskRow}>
+          <View style={{ flex: 1 }}>
+            <H3>{task.title}</H3>
+            <Muted style={{ marginTop: 2, fontSize: 12 }}>
+              {fmtTime(submittedAt)} · 今天
+            </Muted>
+          </View>
+          <Text style={{ color: P.primary, fontSize: 14, marginRight: 4 }}>☆</Text>
+          <Data style={{ color: P.primary, fontSize: 22, fontWeight: '700' }}>
+            {task.points}
+          </Data>
+        </View>
+      </ScrollView>
+      {/* Footer: two buttons */}
       <View style={styles.footerBar}>
-        <Pressable onPress={onClose} style={[styles.primaryBtn, styles.waitBack]}>
-          <Label style={{ color: P.text }}>回到任務</Label>
+        <Pressable onPress={goRewards} style={styles.secondaryBtn}>
+          <Label style={{ color: P.muted }}>看獎勵</Label>
+        </Pressable>
+        <Pressable onPress={onClose} style={styles.primaryBtn}>
+          <RoughStar size={14} color={P.bg} glow={false} />
+          <Label style={{ color: P.bg, fontSize: 15, marginLeft: 8, fontWeight: '800' }}>
+            回到任務
+          </Label>
         </Pressable>
       </View>
     </SafeAreaView>
+  );
+}
+
+function SendingOverlay() {
+  return (
+    <View style={camStyles.overlay}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <Starfield count={60} />
+        <View style={styles.waitBody}>
+          <View style={styles.pipRing}>
+            <View style={styles.pipRingInner}>
+              <Text style={{ fontSize: 96, lineHeight: 110 }}>🦉</Text>
+            </View>
+          </View>
+          <Display style={{ textAlign: 'center', marginTop: spacing.lg }}>
+            星光正在傳送…
+          </Display>
+          <Muted style={{ marginTop: 10, textAlign: 'center', maxWidth: 280 }}>
+            Pip 正在幫你把今天的成果送出去
+          </Muted>
+          <View style={styles.dotRow}>
+            <View style={styles.dot} />
+            <View style={styles.dot} />
+            <View style={styles.dot} />
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -936,6 +1012,61 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  waitTopHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: 10,
+  },
+  waitHandleWrap: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  closeRound: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,242,234,0.08)',
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deliveredChip: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.primary,
+    backgroundColor: 'rgba(247,201,40,0.10)',
+    marginTop: spacing.sm,
+  },
+  deliveredTag: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,201,40,0.16)',
+    borderWidth: 1,
+    borderColor: P.primary,
+  },
+  deliveredTaskRow: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.card,
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   pipRingInner: {
     width: 140,

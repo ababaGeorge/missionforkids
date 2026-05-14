@@ -29,6 +29,7 @@ const emojiFor = (title: string): string => {
   const t = title || '';
   if (/刷牙|牙/.test(t)) return '🦷';
   if (/書|讀|書桌/.test(t)) return '📚';
+  if (/作業|功課|寫|算|數學|考/.test(t)) return '📝';
   if (/洗|澡/.test(t)) return '🛁';
   if (/垃圾|倒|清/.test(t)) return '🧹';
   if (/衣|服/.test(t)) return '👕';
