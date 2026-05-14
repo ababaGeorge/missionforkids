@@ -22,8 +22,8 @@ type NotifItem = {
 };
 
 const KIND_CONFIG: Record<NotifKind, { symbol: string; color: string }> = {
-  task_submitted: { symbol: '○', color: P.primary },
-  reward_ordered: { symbol: '★', color: P.accent },
+  task_submitted: { symbol: '📸', color: P.accent },
+  reward_ordered: { symbol: '🎁', color: P.primary },
 };
 
 const fmtTime = (ts: any): string => {
@@ -152,7 +152,9 @@ export default function ParentNotif() {
             <Label color={P.muted} style={{ fontSize: 11, fontWeight: '800', letterSpacing: 1.5 }}>
               通知
             </Label>
-            <Display style={{ marginTop: 2 }}>最新消息</Display>
+            <Display style={{ marginTop: 2 }}>
+              {unreadCount > 0 ? `${unreadCount} 個新的` : '都看過了'}
+            </Display>
           </View>
           {unreadCount > 0 && (
             <Pressable onPress={markAllRead} style={styles.markReadBtn}>
@@ -163,7 +165,7 @@ export default function ParentNotif() {
 
         <View style={styles.body}>
           {notifs.length === 0 ? (
-            <Empty emoji="◐" title="還沒有通知" body="孩子提交任務或兌換禮物時，會在這裡通知你。" />
+            <Empty emoji="✉️" title="沒有通知" body="小孩做完任務或申請兌換會在這裡。" />
           ) : (
             notifs.map((n) => {
               const isRead = readIds.has(n.id);
@@ -175,8 +177,8 @@ export default function ParentNotif() {
                   style={[styles.notifCard, isRead && styles.notifCardRead]}
                 >
                   {!isRead && <View style={styles.unreadDot} />}
-                  <View style={[styles.iconCircle, { backgroundColor: `${cfg.color}22` }]}>
-                    <Data style={{ color: cfg.color, fontSize: 16, fontWeight: '700' }}>
+                  <View style={[styles.iconCircle, { backgroundColor: `${cfg.color}38` }]}>
+                    <Data style={{ fontSize: 18, lineHeight: 22 }}>
                       {cfg.symbol}
                     </Data>
                   </View>
