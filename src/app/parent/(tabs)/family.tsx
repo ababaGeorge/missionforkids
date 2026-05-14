@@ -215,6 +215,26 @@ export default function FamilyScreen() {
     }
   };
 
+  const handleDeleteInvite = (code: string) => {
+    Alert.alert('刪除邀請碼', `確定要刪除 ${code}？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '刪除',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await firestore()
+              .collection('inviteCodes')
+              .doc(code)
+              .update({ used: true });
+          } catch (e: any) {
+            Alert.alert('錯誤', e.message || '失敗');
+          }
+        },
+      },
+    ]);
+  };
+
   const handleGrant = async () => {
     if (!uid || !family || !grantTarget) return;
     const amount = parseInt(grantAmount);
@@ -376,12 +396,12 @@ export default function FamilyScreen() {
           )}
         </View>
 
-        {invites.length > 0 && (
+        {invites.filter((c) => !c.used).length > 0 && (
           <View style={styles.section}>
             <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
               邀請碼
             </Label>
-            {invites.map((code) => {
+            {invites.filter((c) => !c.used).map((code) => {
               const statusColor = code.used
                 ? P.muted
                 : code.expired
@@ -421,18 +441,25 @@ export default function FamilyScreen() {
                         {statusLabel}
                       </Label>
                     </View>
-                    {(code.used || code.expired) &&
-                      code.role === 'child' &&
-                      code.childUserId && (
-                        <Pressable
-                          onPress={() => handleRegenerate(code.childUserId!)}
-                          style={{ marginTop: 4 }}
-                        >
-                          <Label style={{ color: P.primary, fontSize: 11 }}>
-                            重新產生
-                          </Label>
-                        </Pressable>
-                      )}
+                    {code.expired && code.role === 'child' && code.childUserId && (
+                      <Pressable
+                        onPress={() => handleRegenerate(code.childUserId!)}
+                        style={{ marginTop: 4 }}
+                      >
+                        <Label style={{ color: P.primary, fontSize: 11 }}>
+                          重新產生
+                        </Label>
+                      </Pressable>
+                    )}
+                    <Pressable
+                      onPress={() => handleDeleteInvite(code.code)}
+                      style={{ marginTop: 4 }}
+                      hitSlop={6}
+                    >
+                      <Label style={{ color: P.accentHot, fontSize: 11 }}>
+                        刪除
+                      </Label>
+                    </Pressable>
                   </View>
                 </View>
               );

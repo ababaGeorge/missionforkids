@@ -291,83 +291,83 @@ export default function SignIn() {
         console.warn('[handleDevSignIn] stale cleanup skip:', cleanErr);
       }
 
-      // Parent 額外：清掉 stale dev users 留下的 orphan tasks / taskInstances / rewardItems / rewardOrders。
-      // Child 沒權限改別人的 tasks / rewards，跳過。
-      // Firestore 'in' query 上限 30 個值，超過時切批次。
-      if (role === 'parent' && removedUids.length > 0) {
+      // Parent 額外：用「孤兒判斷」清掉沒有對應活躍成員的 tasks/instances/rewards/orders。
+      // 不依賴本次新 mark removed 的 uid 清單（第二次以後該清單會是空的），
+      // 而是抓「當前所有 active member uid」當白名單，凡是 owner/assignee/creator
+      // 不在白名單裡的，全部視為孤兒 → archive / missed / cancel。
+      if (role === 'parent') {
         try {
-          const chunks: string[][] = [];
-          for (let i = 0; i < removedUids.length; i += 30) {
-            chunks.push(removedUids.slice(i, i + 30));
-          }
-          let archivedCount = 0;
-          for (const ids of chunks) {
-            const ops = firestore().batch();
-            // tasks: createdBy 是 stale dev → archived
-            const tCreated = await firestore()
-              .collection('tasks')
-              .where('familyId', '==', DEV_FAMILY_ID)
-              .where('createdBy', 'in', ids)
-              .get();
-            tCreated.docs.forEach((d) => {
-              if (d.data().status === 'active') {
-                ops.update(d.ref, { status: 'archived' });
-                archivedCount++;
-              }
-            });
-            // tasks: assigneeUserId 是 stale dev → archived
-            const tAssigned = await firestore()
-              .collection('tasks')
-              .where('familyId', '==', DEV_FAMILY_ID)
-              .where('assigneeUserId', 'in', ids)
-              .get();
-            tAssigned.docs.forEach((d) => {
-              if (d.data().status === 'active') {
-                ops.update(d.ref, { status: 'archived' });
-                archivedCount++;
-              }
-            });
-            // taskInstances: userId 是 stale dev → 用 'missed' 隱藏（避免出現在 submitted/notif/history）
+          // 1) 抓 family 全部 active member uid（含 Roy 等真實邀請的孩子）
+          const activeSnap = await firestore()
+            .collection('familyMemberships')
+            .where('familyId', '==', DEV_FAMILY_ID)
+            .where('status', '==', 'active')
+            .get();
+          const activeUids = new Set<string>(activeSnap.docs.map((d) => d.data().userId));
+
+          // 2) 一次掃 active 任務 / submitted+pending+approved instances / active rewards
+          //    / pending+approved+delivered orders。逐筆判斷 owner/assignee 是否在白名單。
+          const ops = firestore().batch();
+          let archived = 0;
+
+          const tasks = await firestore()
+            .collection('tasks')
+            .where('familyId', '==', DEV_FAMILY_ID)
+            .where('status', '==', 'active')
+            .get();
+          tasks.docs.forEach((d) => {
+            const data = d.data();
+            const creatorMissing = !activeUids.has(data.createdBy);
+            const assigneeMissing = data.assigneeUserId && !activeUids.has(data.assigneeUserId);
+            if (creatorMissing || assigneeMissing) {
+              ops.update(d.ref, { status: 'archived' });
+              archived++;
+            }
+          });
+
+          // 抓 instances 用 status='submitted' 兩段（in 也行但更穩用兩次 query）
+          for (const statusVal of ['pending', 'submitted', 'approved'] as const) {
             const insts = await firestore()
               .collection('taskInstances')
               .where('familyId', '==', DEV_FAMILY_ID)
-              .where('userId', 'in', ids)
+              .where('status', '==', statusVal)
               .get();
             insts.docs.forEach((d) => {
-              const s = d.data().status;
-              if (s !== 'missed') {
+              if (!activeUids.has(d.data().userId)) {
                 ops.update(d.ref, { status: 'missed' });
-                archivedCount++;
+                archived++;
               }
             });
-            // rewardItems: createdBy 是 stale dev → archived
-            const rewards = await firestore()
-              .collection('rewardItems')
-              .where('familyId', '==', DEV_FAMILY_ID)
-              .where('createdBy', 'in', ids)
-              .get();
-            rewards.docs.forEach((d) => {
-              if (d.data().status === 'active') {
-                ops.update(d.ref, { status: 'archived' });
-                archivedCount++;
-              }
-            });
-            // rewardOrders: userId 是 stale dev → cancelled
+          }
+
+          const rewards = await firestore()
+            .collection('rewardItems')
+            .where('familyId', '==', DEV_FAMILY_ID)
+            .where('status', '==', 'active')
+            .get();
+          rewards.docs.forEach((d) => {
+            if (!activeUids.has(d.data().createdBy)) {
+              ops.update(d.ref, { status: 'archived' });
+              archived++;
+            }
+          });
+
+          for (const statusVal of ['pending', 'approved', 'delivered'] as const) {
             const orders = await firestore()
               .collection('rewardOrders')
               .where('familyId', '==', DEV_FAMILY_ID)
-              .where('userId', 'in', ids)
+              .where('status', '==', statusVal)
               .get();
             orders.docs.forEach((d) => {
-              const s = d.data().status;
-              if (s !== 'cancelled' && s !== 'completed' && s !== 'rejected') {
+              if (!activeUids.has(d.data().userId)) {
                 ops.update(d.ref, { status: 'cancelled', cancelledAt: now });
-                archivedCount++;
+                archived++;
               }
             });
-            await ops.commit();
           }
-          console.log('[handleDevSignIn] orphan data archived:', archivedCount);
+
+          if (archived > 0) await ops.commit();
+          console.log('[handleDevSignIn] orphan cleanup archived:', archived);
         } catch (orphanErr) {
           console.warn('[handleDevSignIn] orphan cleanup skip:', orphanErr);
         }
