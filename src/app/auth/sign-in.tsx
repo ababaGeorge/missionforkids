@@ -22,6 +22,74 @@ import { P, spacing, radius, shadow } from '../../design/tokens';
 import { Starfield } from '../../design/Starfield';
 import { Display, BodySm, Label, AppText } from '../../design/Text';
 
+async function seedDevTasks(familyId: string, childUid: string) {
+  const now = firestore.Timestamp.now();
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(startOfDay);
+  endOfDay.setHours(23, 59, 59, 999);
+  const dayStart = firestore.Timestamp.fromDate(startOfDay);
+  const dayEnd = firestore.Timestamp.fromDate(endOfDay);
+  const sv = firestore.FieldValue.serverTimestamp();
+
+  type Seed = {
+    id: string;
+    title: string;
+    points: number;
+    frequency: 'daily' | 'weekly';
+    instanceStatus: 'pending' | 'submitted' | 'approved';
+  };
+  const seeds: Seed[] = [
+    { id: 'dev-task-brush', title: '刷牙', points: 5, frequency: 'daily', instanceStatus: 'approved' },
+    { id: 'dev-task-desk', title: '整理書桌', points: 10, frequency: 'daily', instanceStatus: 'pending' },
+    { id: 'dev-task-fish', title: '餵魚', points: 3, frequency: 'daily', instanceStatus: 'approved' },
+    { id: 'dev-task-homework', title: '寫作業', points: 15, frequency: 'daily', instanceStatus: 'submitted' },
+    { id: 'dev-task-trash', title: '倒垃圾', points: 20, frequency: 'weekly', instanceStatus: 'pending' },
+    { id: 'dev-task-toys', title: '整理玩具', points: 15, frequency: 'weekly', instanceStatus: 'pending' },
+  ];
+
+  const batch = firestore().batch();
+  for (const s of seeds) {
+    batch.set(
+      firestore().collection('tasks').doc(s.id),
+      {
+        familyId,
+        title: s.title,
+        points: s.points,
+        frequency: s.frequency,
+        startDate: dayStart,
+        dueDate: dayEnd,
+        graceDays: 0,
+        reviewMode: 'semi_auto',
+        assigneeType: 'individual',
+        assigneeUserId: childUid,
+        status: 'active',
+        createdBy: childUid,
+        createdAt: sv,
+      },
+      { merge: true }
+    );
+    batch.set(
+      firestore().collection('taskInstances').doc(`${s.id}_today_${childUid}`),
+      {
+        taskId: s.id,
+        userId: childUid,
+        familyId,
+        periodStart: dayStart,
+        periodEnd: dayEnd,
+        gracePeriodEnd: dayEnd,
+        status: s.instanceStatus,
+        submissionCount: s.instanceStatus === 'pending' ? 0 : 1,
+        reviewedBy: s.instanceStatus === 'approved' ? childUid : null,
+        reviewedAt: s.instanceStatus === 'approved' ? now : null,
+        pointsAwarded: s.instanceStatus === 'approved' ? s.points : null,
+      },
+      { merge: true }
+    );
+  }
+  await batch.commit();
+}
+
 export default function SignIn() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -68,8 +136,22 @@ export default function SignIn() {
     const DEV_FAMILY_ID = 'dev-family-001';
     try {
       setLoading(true);
-      const cred = await auth().signInAnonymously();
-      const uid = cred.user.uid;
+      if (auth().currentUser) {
+        try { await auth().signOut(); } catch {}
+      }
+      let uid: string;
+      try {
+        const cred = await auth().signInAnonymously();
+        uid = cred.user.uid;
+      } catch (signInErr: any) {
+        // Simulator iOS 26.5 keychain quirk: signInAnonymously throws keychain-error
+        // but currentUser is still populated. Fall through using currentUser.
+        if (signInErr?.code === 'auth/keychain-error' && auth().currentUser) {
+          uid = auth().currentUser!.uid;
+        } else {
+          throw signInErr;
+        }
+      }
       const now = firestore.FieldValue.serverTimestamp();
       const batch = firestore().batch();
 
@@ -92,7 +174,7 @@ export default function SignIn() {
       }
 
       batch.set(
-        firestore().collection('familyMemberships').doc(`${DEV_FAMILY_ID}_${uid}`),
+        firestore().collection('familyMemberships').doc(`${uid}_${DEV_FAMILY_ID}`),
         { familyId: DEV_FAMILY_ID, userId: uid, role, status: 'active', invitedBy: uid, joinedAt: now }
       );
 
@@ -102,6 +184,10 @@ export default function SignIn() {
       );
 
       await batch.commit();
+
+      if (role === 'child') {
+        await seedDevTasks(DEV_FAMILY_ID, uid);
+      }
 
       router.replace(
         role === 'parent' ? '/parent/(tabs)/tasks' : '/child/(tabs)/tasks'

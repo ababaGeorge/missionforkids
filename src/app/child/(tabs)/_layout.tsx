@@ -7,10 +7,10 @@ import { Label } from '../../../design/Text';
 type TabMeta = { key: string; name: string; label: string; icon: string };
 
 const TABS: TabMeta[] = [
-  { key: 'tasks', name: 'tasks', label: '任務', icon: '✦' },
-  { key: 'rewards', name: 'rewards', label: '獎勵', icon: '♡' },
-  { key: 'notif', name: 'notif', label: '通知', icon: '◉' },
-  { key: 'me', name: 'me', label: '我的', icon: '☽' },
+  { key: 'tasks', name: 'tasks', label: '任務', icon: '☰' },
+  { key: 'rewards', name: 'rewards', label: '獎勵', icon: '✦' },
+  { key: 'me', name: 'me', label: '我的', icon: '◉' },
+  { key: 'notif', name: 'notif', label: '通知', icon: '◐' },
 ];
 
 function PTabBar({ state, navigation }: BottomTabBarProps) {
@@ -70,8 +70,8 @@ export default function ChildTabsLayout() {
     >
       <Tabs.Screen name="tasks" />
       <Tabs.Screen name="rewards" />
-      <Tabs.Screen name="notif" />
       <Tabs.Screen name="me" />
+      <Tabs.Screen name="notif" />
     </Tabs>
   );
 }

@@ -3,6 +3,7 @@ import { View, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import { useRouter } from 'expo-router';
 import type { PointWallet, TaskInstance } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
 import { P, spacing, radius } from '../../../design/tokens';
@@ -18,6 +19,7 @@ type Badge = {
 
 export default function ChildMe() {
   const { user } = useAuth();
+  const router = useRouter();
   const uid = user?.id;
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [wallet, setWallet] = useState<PointWallet | null>(null);
@@ -123,7 +125,10 @@ export default function ChildMe() {
   const handleSignOut = () => {
     Alert.alert('登出', '確定要登出嗎？', [
       { text: '取消', style: 'cancel' },
-      { text: '確定', style: 'destructive', onPress: () => auth().signOut() },
+      { text: '確定', style: 'destructive', onPress: async () => {
+          try { await auth().signOut(); } catch {}
+          router.replace('/auth/sign-in');
+        } },
     ]);
   };
 

@@ -48,6 +48,14 @@ const fmtWhen = (ts: any): string => {
   return d.toLocaleDateString();
 };
 
+const dayPhrase = (): string => {
+  const d = new Date();
+  const dow = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+  const hr = d.getHours();
+  const part = hr < 12 ? '早上' : hr < 18 ? '下午' : '晚上';
+  return `星期${dow}${part}`;
+};
+
 export default function ChildTasks() {
   const uid = auth().currentUser?.uid;
   const { user } = useAuth();
@@ -136,14 +144,36 @@ export default function ChildTasks() {
   }, [uid, familyId]);
 
   const grouped = useMemo(() => {
-    const todo = items.filter(
-      (i) => i.instance.status === 'pending' || i.instance.status === 'rejected'
-    );
-    const inFlight = items.filter((i) => i.instance.status === 'submitted');
-    const done = items.filter((i) => i.instance.status === 'approved');
+    const daily: TaskWithInstance[] = [];
+    const weekly: TaskWithInstance[] = [];
+    const other: TaskWithInstance[] = [];
+    for (const it of items) {
+      const f = it.task.frequency;
+      if (f === 'daily') daily.push(it);
+      else if (f === 'weekly') weekly.push(it);
+      else other.push(it);
+    }
+    const count = (arr: TaskWithInstance[]) => ({
+      done: arr.filter((i) => i.instance.status === 'approved').length,
+      total: arr.length,
+    });
     const total = items.length;
-    const pct = total ? Math.round((done.length / total) * 100) : 0;
-    return { todo, inFlight, done, total, pct };
+    const doneAll = items.filter((i) => i.instance.status === 'approved').length;
+    const pendingAll = items.filter(
+      (i) => i.instance.status === 'pending' || i.instance.status === 'rejected'
+    ).length;
+    return {
+      daily,
+      dailyC: count(daily),
+      weekly,
+      weeklyC: count(weekly),
+      other,
+      otherC: count(other),
+      total,
+      done: doneAll,
+      pending: pendingAll,
+      pct: total ? Math.round((doneAll / total) * 100) : 0,
+    };
   }, [items]);
 
   const openTask = (instanceId: string) => {
@@ -164,14 +194,17 @@ export default function ChildTasks() {
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Label color={P.muted} style={{ letterSpacing: 1.5 }}>今天的任務</Label>
-            <Display style={{ marginTop: 4 }}>
-              嗨，<Text style={{ color: P.primary }}>{kidName}</Text>
+            <Label color={P.muted} style={{ letterSpacing: 1.5, fontSize: 11 }}>
+              {dayPhrase()}
+            </Label>
+            <Display style={{ marginTop: 6 }}>
+              嗨 <Text style={{ color: P.primary }}>{kidName}</Text>,
             </Display>
+            <Display style={{ marginTop: -2 }}>今天的任務</Display>
           </View>
           <View style={styles.starPill}>
-            <Data style={{ color: P.star, fontSize: 13 }}>★</Data>
-            <Data style={{ color: P.primary, marginLeft: 4, fontSize: 14 }}>
+            <Data style={{ color: P.bg, fontSize: 13 }}>★</Data>
+            <Data style={{ color: P.bg, marginLeft: 4, fontSize: 14, fontWeight: '800' }}>
               {balance}
             </Data>
           </View>
@@ -180,8 +213,12 @@ export default function ChildTasks() {
         {/* Progress card */}
         <View style={styles.progressCard}>
           <View style={styles.progressHeader}>
-            <Label color={P.muted}>
-              今天完成 {grouped.done.length}/{grouped.total}
+            <Label color={P.text} style={{ fontSize: 13 }}>
+              {grouped.pending > 0
+                ? `${grouped.pending} 個等你，收集星光`
+                : grouped.total > 0
+                ? '今天的任務都完成了'
+                : '今天沒有任務'}
             </Label>
             <Data style={{ color: P.primary, fontSize: 13 }}>{grouped.pct}%</Data>
           </View>
@@ -197,56 +234,32 @@ export default function ChildTasks() {
           <Empty emoji="✦" title="今天沒有任務" body="休息一下，明天再來！" />
         ) : (
           <View style={styles.sections}>
-            {grouped.todo.length > 0 && (
-              <>
-                <SectionHeader
-                  dot={P.primary}
-                  label="要做的"
-                  count={String(grouped.todo.length)}
-                />
-                {grouped.todo.map((it) => (
-                  <TaskCard
-                    key={it.instance.id}
-                    item={it}
-                    tone="todo"
-                    onPress={() => openTask(it.instance.id)}
-                  />
-                ))}
-              </>
+            {grouped.daily.length > 0 && (
+              <FrequencySection
+                label="每日"
+                hint="今晚結束"
+                items={grouped.daily}
+                counts={grouped.dailyC}
+                onOpen={openTask}
+              />
             )}
-            {grouped.inFlight.length > 0 && (
-              <>
-                <SectionHeader
-                  dot={P.accent}
-                  label="等爸媽看"
-                  count={String(grouped.inFlight.length)}
-                />
-                {grouped.inFlight.map((it) => (
-                  <TaskCard
-                    key={it.instance.id}
-                    item={it}
-                    tone="pending"
-                    onPress={() => openTask(it.instance.id)}
-                  />
-                ))}
-              </>
+            {grouped.weekly.length > 0 && (
+              <FrequencySection
+                label="每週"
+                hint="這週任一天"
+                items={grouped.weekly}
+                counts={grouped.weeklyC}
+                onOpen={openTask}
+              />
             )}
-            {grouped.done.length > 0 && (
-              <>
-                <SectionHeader
-                  dot={P.green}
-                  label="完成了"
-                  count={`${grouped.done.length}/${grouped.total}`}
-                />
-                {grouped.done.map((it) => (
-                  <TaskCard
-                    key={it.instance.id}
-                    item={it}
-                    tone="done"
-                    onPress={() => openTask(it.instance.id)}
-                  />
-                ))}
-              </>
+            {grouped.other.length > 0 && (
+              <FrequencySection
+                label="其他"
+                hint="特別任務"
+                items={grouped.other}
+                counts={grouped.otherC}
+                onOpen={openTask}
+              />
             )}
           </View>
         )}
@@ -266,17 +279,63 @@ function SectionHeader({
   dot,
   label,
   count,
+  hint,
 }: {
   dot: string;
   label: string;
   count: string;
+  hint?: string;
 }) {
   return (
     <View style={secStyles.row}>
       <View style={[secStyles.dot, { backgroundColor: dot }]} />
       <H3 style={secStyles.label}>{label}</H3>
       <Data style={secStyles.count}>{count}</Data>
+      {hint && (
+        <BodySm style={{ color: P.muted, marginLeft: 8, fontSize: 11 }}>
+          {hint}
+        </BodySm>
+      )}
     </View>
+  );
+}
+
+function FrequencySection({
+  label,
+  hint,
+  items,
+  counts,
+  onOpen,
+}: {
+  label: string;
+  hint: string;
+  items: TaskWithInstance[];
+  counts: { done: number; total: number };
+  onOpen: (instanceId: string) => void;
+}) {
+  const toneFor = (it: TaskWithInstance): Tone => {
+    const st = it.instance.status;
+    if (st === 'approved') return 'done';
+    if (st === 'submitted') return 'pending';
+    return 'todo';
+  };
+  return (
+    <>
+      <SectionHeader
+        dot={P.primary}
+        label={label}
+        count={`${counts.done}/${counts.total}`}
+        hint={hint}
+      />
+      {items.map((it) => (
+        <TaskCard
+          key={it.instance.id}
+          item={it}
+          tone={toneFor(it)}
+          onPress={() => onOpen(it.instance.id)}
+        />
+      ))}
+    </>
   );
 }
 
@@ -405,9 +464,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
     borderRadius: radius.full,
-    backgroundColor: `${P.primary}18`,
-    borderWidth: 1,
-    borderColor: P.border,
+    backgroundColor: P.primary,
+    borderWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 6,
