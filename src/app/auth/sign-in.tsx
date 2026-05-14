@@ -230,6 +230,7 @@ export default function SignIn() {
         roleType: role,
         birthday: null,
         createdAt: now,
+        isDev: true,
       });
 
       if (role === 'parent') {
@@ -255,6 +256,38 @@ export default function SignIn() {
       );
 
       await batch.commit();
+
+      // 清掉同 family 的 stale dev memberships（前次 dev sign-in 留下的 orphan uid）。
+      // Parent 清掉 parent + child 兩種 role；child 只清 child（不該動 parent 權限）。
+      // 必須在 batch.commit() 後做，否則新 membership 還沒進 firestore，
+      // isFamilyMember rule 會 reject 對其他 membership 的 update。
+      try {
+        const staleSnap = await firestore()
+          .collection('familyMemberships')
+          .where('familyId', '==', DEV_FAMILY_ID)
+          .where('status', '==', 'active')
+          .get();
+        const cleanup = firestore().batch();
+        let cleanCount = 0;
+        for (const d of staleSnap.docs) {
+          const data = d.data();
+          if (data.userId === uid) continue;
+          if (role === 'child' && data.role !== 'child') continue;
+          const userDoc = await firestore().collection('users').doc(data.userId).get();
+          const u = userDoc.data();
+          const isDevUser =
+            u?.isDev === true ||
+            u?.displayName === 'Dev Parent' ||
+            u?.displayName === 'Dev Child';
+          if (isDevUser) {
+            cleanup.update(d.ref, { status: 'removed' });
+            cleanCount++;
+          }
+        }
+        if (cleanCount > 0) await cleanup.commit();
+      } catch (cleanErr) {
+        console.warn('[handleDevSignIn] stale cleanup skip:', cleanErr);
+      }
 
       if (role === 'child') {
         await seedDevTasks(DEV_FAMILY_ID, uid);
