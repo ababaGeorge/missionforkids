@@ -59,6 +59,7 @@ export default function ChildTaskDetail() {
   const [task, setTask] = useState<(Task & { emoji?: string }) | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  const [showCameraPrep, setShowCameraPrep] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
@@ -96,7 +97,8 @@ export default function ChildTaskDetail() {
     else router.replace('/child/(tabs)/tasks');
   };
 
-  const handleTakePhoto = async () => {
+  const launchNativeCamera = async () => {
+    setShowCameraPrep(false);
     try {
       const uri = await pickPhoto();
       if (uri) setPhotoUri(uri);
@@ -107,6 +109,15 @@ export default function ChildTaskDetail() {
         Alert.alert('拍照失敗', '再試一次看看？');
       }
     }
+  };
+
+  const handleTakePhoto = () => {
+    // If retaking after preview, skip prep
+    if (photoUri) {
+      launchNativeCamera();
+      return;
+    }
+    setShowCameraPrep(true);
   };
 
   const handleSubmit = async () => {
@@ -356,9 +367,185 @@ export default function ChildTaskDetail() {
         </View>
       )}
       </KeyboardAvoidingView>
+
+      {showCameraPrep && (
+        <CameraPrep
+          taskTitle={task.title}
+          onCancel={() => setShowCameraPrep(false)}
+          onShutter={launchNativeCamera}
+        />
+      )}
     </SafeAreaView>
   );
 }
+
+function CameraPrep({
+  taskTitle,
+  onCancel,
+  onShutter,
+}: {
+  taskTitle: string;
+  onCancel: () => void;
+  onShutter: () => void;
+}) {
+  return (
+    <View style={camStyles.overlay}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <Starfield count={18} />
+        {/* Top row: ✕ + REC chip */}
+        <View style={camStyles.topRow}>
+          <Pressable onPress={onCancel} style={camStyles.closeRound} hitSlop={10}>
+            <Text style={{ color: P.text, fontSize: 18 }}>✕</Text>
+          </Pressable>
+          <View style={camStyles.recChip}>
+            <View style={camStyles.recDot} />
+            <Text style={{ color: P.primary, fontSize: 11, fontWeight: '800', letterSpacing: 1.5 }}>
+              REC
+            </Text>
+          </View>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {/* Viewfinder placeholder (dashed frame) */}
+        <View style={camStyles.viewfinder}>
+          <Text style={camStyles.viewfinderTitle}>{taskTitle}</Text>
+          <View style={{ flex: 1 }} />
+          <View style={camStyles.pipChip}>
+            <Text style={{ fontSize: 16, marginRight: 6 }}>🦉</Text>
+            <Text style={{ color: P.text, fontSize: 12 }}>Pip 陪你</Text>
+          </View>
+        </View>
+
+        {/* Camera control row */}
+        <View style={camStyles.controlRow}>
+          <View style={camStyles.controlBtnSm}>
+            <Text style={{ color: P.muted, fontSize: 18 }}>⤓</Text>
+          </View>
+          <Pressable onPress={onShutter} style={camStyles.shutter} hitSlop={10}>
+            <View style={camStyles.shutterInner} />
+          </Pressable>
+          <View style={camStyles.controlBtnSm}>
+            <Text style={{ color: P.muted, fontSize: 16 }}>📷</Text>
+          </View>
+          <View style={camStyles.controlBtnSm}>
+            <Text style={{ color: P.muted, fontSize: 18 }}>↻</Text>
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const camStyles = StyleSheet.create({
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: P.bg,
+    zIndex: 100,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  closeRound: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,242,234,0.08)',
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,201,40,0.18)',
+    borderWidth: 1,
+    borderColor: P.primary,
+  },
+  recDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    marginRight: 6,
+  },
+  viewfinder: {
+    flex: 1,
+    marginHorizontal: 18,
+    marginVertical: 8,
+    borderRadius: radius.xl,
+    borderWidth: 2,
+    borderColor: P.primary,
+    borderStyle: 'dashed',
+    backgroundColor: P.surface,
+    padding: 18,
+  },
+  viewfinderTitle: {
+    color: P.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  pipChip: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(247,242,234,0.08)',
+    borderWidth: 1,
+    borderColor: P.border,
+  },
+  controlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+  },
+  controlBtnSm: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.full,
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutter: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: P.primary,
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
+  shutterInner: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    borderWidth: 3,
+    borderColor: P.bg,
+  },
+});
 
 function Wait({
   task,
