@@ -6,6 +6,7 @@ import {
   Pressable,
   Modal,
   TextInput,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
@@ -136,14 +137,26 @@ export default function ParentRewards() {
     return unsub;
   }, [familyId]);
 
-  const handleDeliverOrder = async (orderId: string) => {
-    const now = new Date();
-    const autoComplete = new Date(now.getTime() + 72 * 60 * 60 * 1000);
-    await firestore().collection('rewardOrders').doc(orderId).update({
-      status: 'delivered',
-      deliveredAt: firestore.Timestamp.fromDate(now),
-      autoCompleteAt: firestore.Timestamp.fromDate(autoComplete),
-    });
+  const handleDeliverOrder = (orderId: string) => {
+    Alert.alert('確認交付', '已經把禮物交給孩子了嗎？', [
+      { text: '還沒', style: 'cancel' },
+      {
+        text: '已交付',
+        onPress: async () => {
+          try {
+            const now = new Date();
+            const autoComplete = new Date(now.getTime() + 72 * 60 * 60 * 1000);
+            await firestore().collection('rewardOrders').doc(orderId).update({
+              status: 'delivered',
+              deliveredAt: firestore.Timestamp.fromDate(now),
+              autoCompleteAt: firestore.Timestamp.fromDate(autoComplete),
+            });
+          } catch (e: any) {
+            Alert.alert('失敗', e?.message || '不明錯誤');
+          }
+        },
+      },
+    ]);
   };
 
   const monthStats = useMemo(() => {
@@ -369,26 +382,43 @@ function CreateRewardModal({
       itemType,
       emoji,
     };
-    if (editing) {
-      await firestore().collection('rewardItems').doc(editing.id).update(payload);
-    } else {
-      await firestore().collection('rewardItems').add({
-        familyId,
-        description: null,
-        imageUrl: null,
-        status: 'active',
-        createdBy: uid,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-        ...payload,
-      });
+    try {
+      if (editing) {
+        await firestore().collection('rewardItems').doc(editing.id).update(payload);
+      } else {
+        await firestore().collection('rewardItems').add({
+          familyId,
+          description: null,
+          imageUrl: null,
+          status: 'active',
+          createdBy: uid,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+          ...payload,
+        });
+      }
+      onClose();
+    } catch (e: any) {
+      Alert.alert(editing ? '更新失敗' : '建立失敗', e?.message || '不明錯誤');
     }
-    onClose();
   };
 
-  const handleArchive = async () => {
+  const handleArchive = () => {
     if (!editing) return;
-    await firestore().collection('rewardItems').doc(editing.id).update({ status: 'archived' });
-    onClose();
+    Alert.alert('刪除禮物', `確定要刪除「${editing.title}」？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '刪除',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await firestore().collection('rewardItems').doc(editing.id).update({ status: 'archived' });
+            onClose();
+          } catch (e: any) {
+            Alert.alert('失敗', e?.message || '不明錯誤');
+          }
+        },
+      },
+    ]);
   };
 
   const costNum = parseInt(cost) || 0;

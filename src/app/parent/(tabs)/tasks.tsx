@@ -526,56 +526,60 @@ function CreateTaskModal({
         ? [children[0].id]
         : [];
     if (assignees.length === 0) {
-      Alert.alert('Error', '請先新增孩子到家庭');
+      Alert.alert('錯誤', '請先新增孩子到家庭');
       return;
     }
-    const now = firestore.Timestamp.now();
-    const periodEnd = getPeriodEnd(form.frequency, form.dueDays);
-    const dueDate = firestore.Timestamp.fromDate(periodEnd);
-    const graceDays = parseInt(form.graceDays) || 2;
-    const gracePeriodEnd = firestore.Timestamp.fromDate(
-      new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
-    );
-    const taskRef = await firestore().collection('tasks').add({
-      familyId,
-      title: form.title.trim(),
-      points: parseInt(form.points) || 10,
-      frequency: form.frequency,
-      startDate: now,
-      dueDate,
-      graceDays,
-      reviewMode: form.reviewMode,
-      assigneeType: assignees.length > 1 ? 'family' : 'individual',
-      assigneeUserId: assignees.length === 1 ? assignees[0] : null,
-      status: 'active',
-      createdBy: uid,
-      createdAt: now,
-    });
-    for (const childId of assignees) {
-      await firestore().collection('taskInstances').add({
-        taskId: taskRef.id,
-        userId: childId,
+    try {
+      const now = firestore.Timestamp.now();
+      const periodEnd = getPeriodEnd(form.frequency, form.dueDays);
+      const dueDate = firestore.Timestamp.fromDate(periodEnd);
+      const graceDays = parseInt(form.graceDays) || 2;
+      const gracePeriodEnd = firestore.Timestamp.fromDate(
+        new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
+      );
+      const taskRef = await firestore().collection('tasks').add({
         familyId,
-        periodStart: now,
-        periodEnd: dueDate,
-        gracePeriodEnd,
-        status: 'pending',
-        submissionCount: 0,
-        reviewedBy: null,
-        reviewedAt: null,
-        pointsAwarded: null,
+        title: form.title.trim(),
+        points: parseInt(form.points) || 10,
+        frequency: form.frequency,
+        startDate: now,
+        dueDate,
+        graceDays,
+        reviewMode: form.reviewMode,
+        assigneeType: assignees.length > 1 ? 'family' : 'individual',
+        assigneeUserId: assignees.length === 1 ? assignees[0] : null,
+        status: 'active',
+        createdBy: uid,
+        createdAt: now,
       });
+      for (const childId of assignees) {
+        await firestore().collection('taskInstances').add({
+          taskId: taskRef.id,
+          userId: childId,
+          familyId,
+          periodStart: now,
+          periodEnd: dueDate,
+          gracePeriodEnd,
+          status: 'pending',
+          submissionCount: 0,
+          reviewedBy: null,
+          reviewedAt: null,
+          pointsAwarded: null,
+        });
+      }
+      setForm({
+        title: '',
+        points: '10',
+        selectedChildren: [],
+        frequency: 'once',
+        reviewMode: 'semi_auto',
+        graceDays: '2',
+        dueDays: '1',
+      });
+      onClose();
+    } catch (e: any) {
+      Alert.alert('建立失敗', e?.message || '不明錯誤');
     }
-    setForm({
-      title: '',
-      points: '10',
-      selectedChildren: [],
-      frequency: 'once',
-      reviewMode: 'semi_auto',
-      graceDays: '2',
-      dueDays: '1',
-    });
-    onClose();
   };
 
   const pickTemplate = (t: { title: string; points: number }) => {

@@ -7,10 +7,10 @@ import {
   Image,
   TextInput,
   Modal,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
-  TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
@@ -358,16 +358,20 @@ function ReviewTaskSheet({
   if (!item) return null;
 
   const handleApprove = async () => {
-    await firestore()
-      .collection('taskInstances')
-      .doc(item.instance.id)
-      .update({
-        status: 'approved',
-        reviewedBy: uid,
-        reviewedAt: firestore.FieldValue.serverTimestamp(),
-        ...(note.trim() ? { parentNote: note.trim() } : {}),
-      });
-    onClose();
+    try {
+      await firestore()
+        .collection('taskInstances')
+        .doc(item.instance.id)
+        .update({
+          status: 'approved',
+          reviewedBy: uid,
+          reviewedAt: firestore.FieldValue.serverTimestamp(),
+          ...(note.trim() ? { parentNote: note.trim() } : {}),
+        });
+      onClose();
+    } catch (e: any) {
+      Alert.alert('通過失敗', e?.message || '不明錯誤');
+    }
   };
 
   const handleReject = async () => {
@@ -379,18 +383,22 @@ function ReviewTaskSheet({
       reviewedAt: firestore.FieldValue.serverTimestamp(),
     };
     if (note.trim()) updates.parentNote = note.trim();
-    await firestore()
-      .collection('taskInstances')
-      .doc(item.instance.id)
-      .update(updates);
-    if (note.trim()) {
+    try {
       await firestore()
-        .collection('taskSubmissions')
-        .doc(item.submission.id)
-        .update({ rejectNote: note.trim() });
+        .collection('taskInstances')
+        .doc(item.instance.id)
+        .update(updates);
+      if (note.trim()) {
+        await firestore()
+          .collection('taskSubmissions')
+          .doc(item.submission.id)
+          .update({ rejectNote: note.trim() });
+      }
+      Keyboard.dismiss();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('退回失敗', e?.message || '不明錯誤');
     }
-    Keyboard.dismiss();
-    onClose();
   };
 
   return (
@@ -552,16 +560,20 @@ function RedeemConfirmSheet({
   if (!order) return null;
 
   const handleApprove = async () => {
-    await firestore()
-      .collection('rewardOrders')
-      .doc(order.order.id)
-      .update({
-        status: 'approved',
-        approvedAt: firestore.FieldValue.serverTimestamp(),
-        ...(note.trim() ? { parentNote: note.trim() } : {}),
-      });
-    Keyboard.dismiss();
-    onClose();
+    try {
+      await firestore()
+        .collection('rewardOrders')
+        .doc(order.order.id)
+        .update({
+          status: 'approved',
+          approvedAt: firestore.FieldValue.serverTimestamp(),
+          ...(note.trim() ? { parentNote: note.trim() } : {}),
+        });
+      Keyboard.dismiss();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('同意失敗', e?.message || '不明錯誤');
+    }
   };
 
   const handleReject = async () => {
@@ -569,15 +581,19 @@ function RedeemConfirmSheet({
       // 留言必填（spec 4.4 提到）
       return;
     }
-    await firestore()
-      .collection('rewardOrders')
-      .doc(order.order.id)
-      .update({
-        status: 'rejected',
-        parentNote: note.trim(),
-      });
-    Keyboard.dismiss();
-    onClose();
+    try {
+      await firestore()
+        .collection('rewardOrders')
+        .doc(order.order.id)
+        .update({
+          status: 'rejected',
+          parentNote: note.trim(),
+        });
+      Keyboard.dismiss();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('婉拒失敗', e?.message || '不明錯誤');
+    }
   };
 
   const cost = order.order.pointCostSnapshot;
