@@ -108,6 +108,28 @@ export async function redeemInviteCode(
     await firestore().collection('users').doc(data.childUserId).update({
       authProviderId: authUid,
     });
+    // 同時為真實 auth UID 建立 membership（rules 用 ${uid}_${familyId} 查 isFamilyMember，
+    // 否則 invited child 簽進來會 permission-denied 看不到任何 family 資料）。
+    await firestore()
+      .collection('familyMemberships')
+      .doc(`${authUid}_${data.familyId}`)
+      .set({
+        familyId: data.familyId,
+        userId: authUid,
+        role: 'child',
+        status: 'active',
+        invitedBy: null,
+        joinedAt: firestore.FieldValue.serverTimestamp(),
+      });
+    // 標記 placeholder membership（家長端建的）為 removed，避免重複顯示
+    try {
+      await firestore()
+        .collection('familyMemberships')
+        .doc(`${data.childUserId}_${data.familyId}`)
+        .update({ status: 'removed' });
+    } catch {
+      // placeholder 可能不存在（舊資料），忽略
+    }
   }
 
   // 標記碼為已使用

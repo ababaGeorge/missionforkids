@@ -597,7 +597,10 @@ function RedeemConfirmSheet({
   };
 
   const cost = order.order.pointCostSnapshot;
-  const afterBalance = balance != null ? balance - cost : null;
+  // 孩子申請時 cloud function 已扣點。balance 是 *扣後* 餘額。
+  // 「兌換前」= balance + cost（還沒扣的狀態），「兌換後」= balance（同意後維持扣除）。
+  const beforeBalance = balance != null ? balance + cost : null;
+  const afterBalance = balance;
 
   return (
     <Modal
@@ -642,17 +645,17 @@ function RedeemConfirmSheet({
               <H3 style={sheetStyles.rewardName}>{order.item?.title || '—'}</H3>
               <Data style={sheetStyles.rewardCost}>− ★ {cost}</Data>
 
-              {/* 星光對比 */}
+              {/* 星光對比 — 孩子申請時已扣點，所以顯示「兌換前 → 兌換後」 */}
               <View style={sheetStyles.balanceRow}>
                 <View style={sheetStyles.balancePill}>
-                  <Label style={{ color: '#8A8275', fontSize: 10 }}>現在</Label>
+                  <Label style={{ color: '#8A8275', fontSize: 10 }}>兌換前</Label>
                   <Data style={{ color: '#1C1A14', fontSize: 16, fontWeight: '700' }}>
-                    ★ {balance ?? '—'}
+                    ★ {beforeBalance ?? '—'}
                   </Data>
                 </View>
                 <Body style={{ fontSize: 18, color: '#8A8275' }}>→</Body>
                 <View style={sheetStyles.balancePill}>
-                  <Label style={{ color: '#8A8275', fontSize: 10 }}>之後</Label>
+                  <Label style={{ color: '#8A8275', fontSize: 10 }}>兌換後</Label>
                   <Data
                     style={{
                       fontSize: 16,
