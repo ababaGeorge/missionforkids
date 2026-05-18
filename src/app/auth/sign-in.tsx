@@ -17,7 +17,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { redeemInviteCode } from '../../lib/inviteCode';
+import { redeemInviteCode, createInviteCode } from '../../lib/inviteCode';
 import { P, spacing, radius, shadow } from '../../design/tokens';
 import { Starfield } from '../../design/Starfield';
 import { Display, BodySm, Label, AppText } from '../../design/Text';
@@ -49,8 +49,18 @@ async function seedDevTasks(familyId: string, childUid: string) {
     { id: 'dev-task-toys', title: '整理玩具', points: 15, frequency: 'weekly', instanceStatus: 'pending' },
   ];
 
+  // 先查哪些 instance 已存在 — 已存在的不覆寫，保住小孩做過的進度
+  // （否則每次重進都把 approved/submitted 洗回 seed 的 pending）。
+  const instanceRefs = seeds.map((s) =>
+    firestore().collection('taskInstances').doc(`${s.id}_today_${childUid}`)
+  );
+  const existing = await Promise.all(instanceRefs.map((r) => r.get()));
+  const exists = new Set(
+    existing.filter((d) => d.exists()).map((d) => d.id)
+  );
+
   const batch = firestore().batch();
-  for (const s of seeds) {
+  seeds.forEach((s, i) => {
     batch.set(
       firestore().collection('tasks').doc(s.id),
       {
@@ -71,24 +81,22 @@ async function seedDevTasks(familyId: string, childUid: string) {
       },
       { merge: true }
     );
-    batch.set(
-      firestore().collection('taskInstances').doc(`${s.id}_today_${childUid}`),
-      {
-        taskId: s.id,
-        userId: childUid,
-        familyId,
-        periodStart: dayStart,
-        periodEnd: dayEnd,
-        gracePeriodEnd: dayEnd,
-        status: s.instanceStatus,
-        submissionCount: s.instanceStatus === 'pending' ? 0 : 1,
-        reviewedBy: s.instanceStatus === 'approved' ? childUid : null,
-        reviewedAt: s.instanceStatus === 'approved' ? now : null,
-        pointsAwarded: s.instanceStatus === 'approved' ? s.points : null,
-      },
-      { merge: true }
-    );
-  }
+    const instRef = instanceRefs[i];
+    if (exists.has(instRef.id)) return; // 進度已存在，不動
+    batch.set(instRef, {
+      taskId: s.id,
+      userId: childUid,
+      familyId,
+      periodStart: dayStart,
+      periodEnd: dayEnd,
+      gracePeriodEnd: dayEnd,
+      status: s.instanceStatus,
+      submissionCount: s.instanceStatus === 'pending' ? 0 : 1,
+      reviewedBy: s.instanceStatus === 'approved' ? childUid : null,
+      reviewedAt: s.instanceStatus === 'approved' ? now : null,
+      pointsAwarded: s.instanceStatus === 'approved' ? s.points : null,
+    });
+  });
   await batch.commit();
   await seedDevRewards(familyId, childUid);
   await seedDevOrder(familyId, childUid);
@@ -387,6 +395,92 @@ export default function SignIn() {
     }
   };
 
+  // dev：以家長已建的現有小孩（QQ/RR）身分進入。
+  // 背後跑正式 createInviteCode + redeemInvite(callable) 綁定流程，
+  // 走的是正式 code path，不是身分替身。整段 dev-gated，可整塊移除。
+  const handleDevSignInAsExistingChild = async () => {
+    const DEV_FAMILY_ID = 'dev-family-001';
+    try {
+      setLoading(true);
+      if (auth().currentUser) {
+        try { await auth().signOut(); } catch {}
+      }
+      let uid: string;
+      try {
+        uid = (await auth().signInAnonymously()).user.uid;
+      } catch (signInErr: any) {
+        if (signInErr?.code === 'auth/keychain-error' && auth().currentUser) {
+          uid = auth().currentUser!.uid;
+        } else {
+          throw signInErr;
+        }
+      }
+
+      const memSnap = await firestore()
+        .collection('familyMemberships')
+        .where('familyId', '==', DEV_FAMILY_ID)
+        .where('role', '==', 'child')
+        .get();
+      const seen = new Set<string>();
+      const kids: { childUserId: string; name: string }[] = [];
+      for (const d of memSnap.docs) {
+        const cid = d.data().userId as string;
+        if (seen.has(cid)) continue;
+        seen.add(cid);
+        const ud = await firestore().collection('users').doc(cid).get();
+        const u = ud.data();
+        if (!u) continue; // authUid membership 沒有對應 user doc，跳過
+        if (u.isDev === true || u.displayName === 'Dev Child') continue;
+        kids.push({ childUserId: cid, name: u.displayName || '小孩' });
+      }
+
+      if (kids.length === 0) {
+        setLoading(false);
+        try { await auth().signOut(); } catch {}
+        Alert.alert(
+          '沒有可用的小孩',
+          '請先以家長身分進入，到「家庭」頁新增小孩（QQ/RR）'
+        );
+        return;
+      }
+
+      const bind = async (childUserId: string) => {
+        try {
+          const code = await createInviteCode(childUserId, DEV_FAMILY_ID);
+          await redeemInviteCode(code, uid);
+          await seedDevTasks(DEV_FAMILY_ID, uid);
+          router.replace('/child/(tabs)/tasks');
+        } catch (err: any) {
+          setLoading(false);
+          try { await auth().signOut(); } catch {}
+          Alert.alert('綁定失敗', err?.message || '請重試');
+        }
+      };
+
+      Alert.alert(
+        '以哪個小孩進入？',
+        'dev：背後跑正式邀請碼兌換流程',
+        [
+          ...kids.map((k) => ({
+            text: k.name,
+            onPress: () => bind(k.childUserId),
+          })),
+          {
+            text: '取消',
+            style: 'cancel' as const,
+            onPress: async () => {
+              setLoading(false);
+              try { await auth().signOut(); } catch {}
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
+      setLoading(false);
+      Alert.alert(t('common.error'), error.message);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -531,6 +625,18 @@ export default function SignIn() {
                     <AppText style={styles.devButtonText}>以孩子身分進入</AppText>
                   </Pressable>
                 </View>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.devButton,
+                    { marginTop: spacing.sm },
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={handleDevSignInAsExistingChild}
+                >
+                  <AppText style={styles.devButtonText}>
+                    以現有小孩進入（QQ/RR）
+                  </AppText>
+                </Pressable>
               </View>
             </ScrollView>
           </TouchableWithoutFeedback>

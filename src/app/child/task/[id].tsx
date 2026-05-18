@@ -157,6 +157,43 @@ export default function ChildTaskDetail() {
     }
   };
 
+  // dev：simulator 沒有相機，無法拍照提交。直接送出一筆無照片 submission
+  // 讓點數 happy path 可以在 simulator 跑完。dev-gated，可整段移除。
+  const handleDevSubmitNoPhoto = async () => {
+    if (!instance || !task || !uid) return;
+    if ((instance.submissionCount || 0) >= MAX_SUBMISSIONS) {
+      Alert.alert('已達提交上限', '這個任務今天不能再提交了。');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      await firestore().collection('taskSubmissions').add({
+        taskInstanceId: instance.id,
+        familyId: instance.familyId,
+        submittedBy: uid,
+        photoUrls: [],
+        childNote: (note.trim() || '[dev] 無照片提交'),
+        aiResult: null,
+        aiConfidence: null,
+        submittedAt: firestore.FieldValue.serverTimestamp(),
+      });
+      await firestore()
+        .collection('taskInstances')
+        .doc(instance.id)
+        .update({
+          status: 'submitted',
+          submissionCount: (instance.submissionCount || 0) + 1,
+          submittedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      setPhotoUri(null);
+      setNote('');
+    } catch (e: any) {
+      Alert.alert('假提交失敗', e?.message || '再試一次');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleRetry = async () => {
     if (!instance) return;
     try {
@@ -365,6 +402,17 @@ export default function ChildTaskDetail() {
               </>
             )}
           </Pressable>
+          {canSubmit && (
+            <Pressable
+              onPress={handleDevSubmitNoPhoto}
+              disabled={submitting}
+              style={styles.devSubmitBtn}
+            >
+              <Label style={{ color: P.muted, fontSize: 13 }}>
+                [dev] 假提交（跳過拍照）
+              </Label>
+            </Pressable>
+          )}
         </View>
       )}
       </KeyboardAvoidingView>
@@ -1013,6 +1061,15 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 4,
     paddingHorizontal: 10,
+  },
+  devSubmitBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryCTA: {
     flex: 1,
