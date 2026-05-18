@@ -47,12 +47,15 @@ export const grantPoints = onCall(async (request) => {
 
   // Atomic transaction: 建立或更新 wallet + 建立 transaction
   await db.runTransaction(async (tx) => {
-    const walletQuery = await db
-      .collection('pointWallets')
-      .where('userId', '==', childUserId)
-      .where('familyId', '==', familyId)
-      .limit(1)
-      .get();
+    // 必須用 tx.get：grantPoints 寫的是 clamp 後的絕對值（非 increment），
+    // 讀取沒掛在交易上的話，並發呼叫會 lost update。
+    const walletQuery = await tx.get(
+      db
+        .collection('pointWallets')
+        .where('userId', '==', childUserId)
+        .where('familyId', '==', familyId)
+        .limit(1)
+    );
 
     let walletRef: admin.firestore.DocumentReference;
     let delta = amount; // 實際變動量（扣點被 clamp 時會小於 |amount|）
