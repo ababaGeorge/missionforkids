@@ -33,6 +33,9 @@ export interface FamilyMembership {
   status: MembershipStatus;
   invitedBy: string;
   joinedAt: Timestamp | null;
+  // family-scoped 覆寫：與真實 user.displayName / avatar 無關，僅此家庭內顯示用
+  nickname?: string | null;
+  avatarEmoji?: string | null;
 }
 
 // ============================================

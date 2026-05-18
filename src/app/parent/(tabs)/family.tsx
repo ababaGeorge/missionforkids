@@ -35,6 +35,17 @@ import {
 
 type MemberRow = { membership: FamilyMembership; user: User };
 
+// family-scoped 顯示：暱稱優先於真實 displayName
+const nameOf = (m: MemberRow): string =>
+  m.membership.nickname?.trim() || m.user.displayName || '?';
+const avatarOf = (m: MemberRow): string | null =>
+  m.membership.avatarEmoji?.trim() || null;
+
+const AVATAR_EMOJIS = [
+  '🦊', '🐯', '🐻', '🐼', '🐰', '🐱', '🐶', '🦁',
+  '🐵', '🐸', '🐧', '🦄', '🌟', '⚽', '🎨', '🚀',
+];
+
 type InviteRow = {
   code: string;
   childUserId: string | null;
@@ -62,6 +73,7 @@ export default function FamilyScreen() {
   const [grantAmount, setGrantAmount] = useState('10');
   const [grantReason, setGrantReason] = useState('');
   const [grantMode, setGrantMode] = useState<'give' | 'deduct'>('give');
+  const [manageMember, setManageMember] = useState<MemberRow | null>(null);
 
   useEffect(() => {
     if (!uid) return;
@@ -353,17 +365,22 @@ export default function FamilyScreen() {
               家長
             </Label>
             {parents.map((m) => (
-              <View key={m.membership.id} style={styles.memberRow}>
+              <Pressable
+                key={m.membership.id}
+                onPress={() => setManageMember(m)}
+                style={styles.memberRow}
+              >
                 <View style={[styles.avatar, { backgroundColor: P.blue }]}>
-                  <Label style={{ color: P.bg, fontSize: 14 }}>
-                    {m.user.displayName[0]?.toUpperCase() || '?'}
+                  <Label style={{ color: P.bg, fontSize: avatarOf(m) ? 20 : 14 }}>
+                    {avatarOf(m) || nameOf(m)[0]?.toUpperCase() || '?'}
                   </Label>
                 </View>
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                  <H3 style={{ fontSize: 15 }}>{m.user.displayName}</H3>
+                  <H3 style={{ fontSize: 15 }}>{nameOf(m)}</H3>
                   <Muted style={{ fontSize: 11, marginTop: 2 }}>家長</Muted>
                 </View>
-              </View>
+                <Muted style={{ fontSize: 18 }}>›</Muted>
+              </Pressable>
             ))}
           </View>
         )}
@@ -376,21 +393,25 @@ export default function FamilyScreen() {
             <Muted>還沒有小孩加入</Muted>
           ) : (
             children.map((m) => (
-              <View key={m.membership.id} style={styles.memberRow}>
+              <Pressable
+                key={m.membership.id}
+                onPress={() => setManageMember(m)}
+                style={styles.memberRow}
+              >
                 <View style={[styles.avatar, { backgroundColor: P.primary }]}>
-                  <Label style={{ color: P.bg, fontSize: 14 }}>
-                    {m.user.displayName[0]?.toUpperCase() || '?'}
+                  <Label style={{ color: P.bg, fontSize: avatarOf(m) ? 20 : 14 }}>
+                    {avatarOf(m) || nameOf(m)[0]?.toUpperCase() || '?'}
                   </Label>
                 </View>
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                  <H3 style={{ fontSize: 15 }}>{m.user.displayName}</H3>
+                  <H3 style={{ fontSize: 15 }}>{nameOf(m)}</H3>
                   <Muted style={{ fontSize: 11, marginTop: 2 }}>小孩</Muted>
                 </View>
                 <Pressable
                   onPress={() => {
                     setGrantTarget({
                       userId: m.user.id,
-                      name: m.user.displayName,
+                      name: nameOf(m),
                     });
                     setShowGrant(true);
                   }}
@@ -401,7 +422,7 @@ export default function FamilyScreen() {
                     ±
                   </Label>
                 </Pressable>
-              </View>
+              </Pressable>
             ))
           )}
         </View>
@@ -696,7 +717,158 @@ export default function FamilyScreen() {
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ManageMemberModal
+        member={manageMember}
+        currentUid={uid}
+        familyCreatedBy={family.createdBy}
+        onClose={() => setManageMember(null)}
+      />
     </SafeAreaView>
+  );
+}
+
+function ManageMemberModal({
+  member,
+  currentUid,
+  familyCreatedBy,
+  onClose,
+}: {
+  member: MemberRow | null;
+  currentUid: string | undefined;
+  familyCreatedBy: string;
+  onClose: () => void;
+}) {
+  const [nickname, setNickname] = useState('');
+  const [avatar, setAvatar] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (member) {
+      setNickname(member.membership.nickname || '');
+      setAvatar(member.membership.avatarEmoji || null);
+    }
+  }, [member]);
+
+  if (!member) return null;
+
+  const isSelf = member.membership.userId === currentUid;
+  const isChild = member.membership.role === 'child';
+  const isCreator = currentUid === familyCreatedBy;
+  // 小孩：任何家長可移除。家長：只有 family 建立者可移除，且不能移除自己。
+  const canRemove = !isSelf && (isChild || isCreator);
+
+  const handleSave = async () => {
+    try {
+      await firestore()
+        .collection('familyMemberships')
+        .doc(member.membership.id)
+        .update({
+          nickname: nickname.trim() || null,
+          avatarEmoji: avatar || null,
+        });
+      onClose();
+    } catch (e: any) {
+      Alert.alert('儲存失敗', e?.message || '不明錯誤');
+    }
+  };
+
+  const handleRemove = () => {
+    Alert.alert(
+      '移除成員',
+      `確定要把「${nameOf(member)}」移出這個家庭？`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '移除',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await firestore()
+                .collection('familyMemberships')
+                .doc(member.membership.id)
+                .update({ status: 'removed' });
+              onClose();
+            } catch (e: any) {
+              Alert.alert('移除失敗', e?.message || '不明錯誤');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <Modal visible={!!member} animationType="slide" transparent>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={modalStyles.overlay}>
+            <View style={modalStyles.sheet}>
+              <H3 style={{ marginBottom: spacing.md }}>
+                {isChild ? '小孩' : '家長'}設定
+              </H3>
+
+              <Label color={P.muted} style={{ marginBottom: 6 }}>
+                暱稱（這個家庭內顯示）
+              </Label>
+              <TextInput
+                style={modalStyles.input}
+                placeholder={member.user.displayName}
+                placeholderTextColor={P.muted}
+                value={nickname}
+                onChangeText={setNickname}
+              />
+
+              <Label color={P.muted} style={{ marginTop: 4, marginBottom: 8 }}>
+                頭像
+              </Label>
+              <View style={modalStyles.emojiGrid}>
+                <Pressable
+                  onPress={() => setAvatar(null)}
+                  style={[
+                    modalStyles.emojiCell,
+                    !avatar && modalStyles.emojiCellOn,
+                  ]}
+                >
+                  <Label style={{ color: P.text, fontSize: 13 }}>字</Label>
+                </Pressable>
+                {AVATAR_EMOJIS.map((e) => (
+                  <Pressable
+                    key={e}
+                    onPress={() => setAvatar(e)}
+                    style={[
+                      modalStyles.emojiCell,
+                      avatar === e && modalStyles.emojiCellOn,
+                    ]}
+                  >
+                    <Label style={{ fontSize: 20 }}>{e}</Label>
+                  </Pressable>
+                ))}
+              </View>
+
+              {canRemove && (
+                <Pressable onPress={handleRemove} style={modalStyles.removeBtn}>
+                  <Label style={{ color: P.accentHot, fontSize: 13 }}>
+                    把 {nameOf(member)} 移出家庭
+                  </Label>
+                </Pressable>
+              )}
+
+              <View style={modalStyles.actions}>
+                <Pressable onPress={onClose} style={modalStyles.cancel}>
+                  <Label style={{ color: P.muted }}>取消</Label>
+                </Pressable>
+                <Pressable onPress={handleSave} style={modalStyles.save}>
+                  <Label style={{ color: P.bg }}>儲存</Label>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -861,5 +1033,31 @@ const modalStyles = StyleSheet.create({
   modeBtnOn: {
     backgroundColor: P.primary,
     borderColor: P.primary,
+  },
+  emojiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: spacing.md,
+  },
+  emojiCell: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: P.bg,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emojiCellOn: {
+    borderWidth: 2,
+    borderColor: P.primary,
+    backgroundColor: `${P.primary}33`,
+  },
+  removeBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: spacing.sm,
   },
 });
