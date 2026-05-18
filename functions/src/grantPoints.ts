@@ -20,9 +20,10 @@ export const grantPoints = onCall(async (request) => {
     reason: string;
   };
 
-  if (!childUserId || !familyId || !amount || amount <= 0) {
+  if (!childUserId || !familyId || !amount || amount === 0) {
     throw new HttpsError('invalid-argument', 'Missing or invalid parameters');
   }
+  // amount > 0 給點、amount < 0 扣點。扣點時餘額不低於 0（transaction 內 clamp）。
 
   // 驗證呼叫者是家長
   const parentMemberDoc = await db
@@ -54,33 +55,42 @@ export const grantPoints = onCall(async (request) => {
       .get();
 
     let walletRef: admin.firestore.DocumentReference;
+    let delta = amount; // 實際變動量（扣點被 clamp 時會小於 |amount|）
 
     if (walletQuery.empty) {
       walletRef = db.collection('pointWallets').doc();
+      // 新 wallet：扣點不可為負，clamp 到 0
+      const initial = Math.max(0, amount);
+      delta = initial;
       tx.set(walletRef, {
         userId: childUserId,
         familyId,
-        balance: amount,
+        balance: initial,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else {
       walletRef = walletQuery.docs[0].ref;
+      const current = (walletQuery.docs[0].data().balance as number) || 0;
+      const next = Math.max(0, current + amount); // 餘額不低於 0
+      delta = next - current;
       tx.update(walletRef, {
-        balance: admin.firestore.FieldValue.increment(amount),
+        balance: next,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
 
-    const txRef = db.collection('pointTransactions').doc();
-    tx.set(txRef, {
-      walletId: walletRef.id,
-      delta: amount,
-      sourceType: 'parent_grant',
-      sourceId: null,
-      createdBy: uid,
-      note: reason || 'Parent grant',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    if (delta !== 0) {
+      const txRef = db.collection('pointTransactions').doc();
+      tx.set(txRef, {
+        walletId: walletRef.id,
+        delta,
+        sourceType: 'parent_grant',
+        sourceId: null,
+        createdBy: uid,
+        note: reason || (amount < 0 ? 'Parent deduct' : 'Parent grant'),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
   });
 
   return { success: true };

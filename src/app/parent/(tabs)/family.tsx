@@ -61,6 +61,7 @@ export default function FamilyScreen() {
   const [grantTarget, setGrantTarget] = useState<{ userId: string; name: string } | null>(null);
   const [grantAmount, setGrantAmount] = useState('10');
   const [grantReason, setGrantReason] = useState('');
+  const [grantMode, setGrantMode] = useState<'give' | 'deduct'>('give');
 
   useEffect(() => {
     if (!uid) return;
@@ -239,20 +240,27 @@ export default function FamilyScreen() {
 
   const handleGrant = async () => {
     if (!uid || !family || !grantTarget) return;
-    const amount = parseInt(grantAmount);
-    if (!amount || amount <= 0) return;
+    const raw = parseInt(grantAmount);
+    if (!raw || raw <= 0) return;
+    const signed = grantMode === 'deduct' ? -raw : raw;
     try {
       const fn = functions().httpsCallable('grantPoints');
       await fn({
         childUserId: grantTarget.userId,
         familyId: family.id,
-        amount,
-        reason: grantReason.trim() || '爸媽直接給',
+        amount: signed,
+        reason:
+          grantReason.trim() ||
+          (grantMode === 'deduct' ? '爸媽扣點' : '爸媽直接給'),
       });
-      Alert.alert('', `+${amount} ★ → ${grantTarget.name}`);
+      Alert.alert(
+        '',
+        `${signed > 0 ? '+' : ''}${signed} ★ → ${grantTarget.name}`
+      );
       setShowGrant(false);
       setGrantAmount('10');
       setGrantReason('');
+      setGrantMode('give');
       setGrantTarget(null);
     } catch (e: any) {
       Alert.alert('錯誤', e.message || '失敗');
@@ -390,7 +398,7 @@ export default function FamilyScreen() {
                 >
                   <RoughStar size={12} glow={false} />
                   <Label style={{ color: P.primary, fontSize: 11, marginLeft: 4 }}>
-                    +
+                    ±
                   </Label>
                 </Pressable>
               </View>
@@ -612,8 +620,32 @@ export default function FamilyScreen() {
             <View style={modalStyles.overlay}>
               <View style={modalStyles.sheet}>
                 <H3 style={{ marginBottom: spacing.md }}>
-                  直接給點 → {grantTarget?.name}
+                  {grantMode === 'deduct' ? '扣點' : '給點'} → {grantTarget?.name}
                 </H3>
+
+                <View style={modalStyles.modeRow}>
+                  {(['give', 'deduct'] as const).map((mode) => {
+                    const on = grantMode === mode;
+                    return (
+                      <Pressable
+                        key={mode}
+                        onPress={() => setGrantMode(mode)}
+                        style={[modalStyles.modeBtn, on && modalStyles.modeBtnOn]}
+                      >
+                        <Label
+                          style={{
+                            color: on ? P.bg : P.text,
+                            fontSize: 13,
+                            fontWeight: '700',
+                          }}
+                        >
+                          {mode === 'give' ? '給點 +' : '扣點 −'}
+                        </Label>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
                 <TextInput
                   style={modalStyles.input}
                   placeholder="點數"
@@ -630,18 +662,33 @@ export default function FamilyScreen() {
                   value={grantReason}
                   onChangeText={setGrantReason}
                 />
+                {grantMode === 'deduct' && (
+                  <Muted style={{ fontSize: 11, marginBottom: 8 }}>
+                    扣點後餘額不會低於 0
+                  </Muted>
+                )}
                 <View style={modalStyles.actions}>
                   <Pressable
                     onPress={() => {
                       setShowGrant(false);
                       setGrantTarget(null);
+                      setGrantMode('give');
                     }}
                     style={modalStyles.cancel}
                   >
                     <Label style={{ color: P.muted }}>取消</Label>
                   </Pressable>
-                  <Pressable onPress={handleGrant} style={modalStyles.save}>
-                    <Label style={{ color: P.bg }}>+{grantAmount || '0'} ★</Label>
+                  <Pressable
+                    onPress={handleGrant}
+                    style={[
+                      modalStyles.save,
+                      grantMode === 'deduct' && { backgroundColor: P.accentHot },
+                    ]}
+                  >
+                    <Label style={{ color: P.bg }}>
+                      {grantMode === 'deduct' ? '−' : '+'}
+                      {grantAmount || '0'} ★
+                    </Label>
                   </Pressable>
                 </View>
               </View>
@@ -796,5 +843,23 @@ const modalStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: spacing.sm,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: spacing.md,
+  },
+  modeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    backgroundColor: P.surfaceHi,
+    alignItems: 'center',
+  },
+  modeBtnOn: {
+    backgroundColor: P.primary,
+    borderColor: P.primary,
   },
 });
