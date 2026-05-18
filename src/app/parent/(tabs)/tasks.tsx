@@ -488,7 +488,9 @@ function CreateTaskModal({
     frequency: 'once' as 'once' | 'daily' | 'weekly' | 'monthly',
     reviewMode: 'semi_auto' as 'semi_auto' | 'manual',
     graceDays: '2',
-    dueDays: '1',
+    dueDays: '1', // once: 1-365 自由填
+    weekday: '1', // weekly: 1=一 ... 7=日
+    monthDay: '1', // monthly: '1'|'5'|'10'|'15'|'20'|'25'|'eom'
   });
 
   const toggleChild = (id: string) =>
@@ -499,21 +501,48 @@ function CreateTaskModal({
         : [...s.selectedChildren, id],
     }));
 
-  const getPeriodEnd = (frequency: string, dueDays: string): Date => {
+  // Plan C：每天=當天底；每週=下一個指定週幾；每月=指定號數(或月底，自動處理2月大小月)；單次=N天後
+  const getPeriodEnd = (): Date => {
     const now = new Date();
-    const days = parseInt(dueDays) || 1;
-    switch (frequency) {
-      case 'daily':
-        return new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      case 'weekly':
-        return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      case 'monthly': {
-        const next = new Date(now);
-        next.setMonth(next.getMonth() + 1);
-        return next;
+    switch (form.frequency) {
+      case 'daily': {
+        const d = new Date(now);
+        d.setHours(23, 59, 59, 0);
+        return d;
       }
-      default:
-        return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+      case 'weekly': {
+        const target = parseInt(form.weekday) || 1; // 1=一..7=日
+        const jsTarget = target === 7 ? 0 : target; // JS getDay: 0=日..6=六
+        const d = new Date(now);
+        let diff = (jsTarget - d.getDay() + 7) % 7;
+        if (diff === 0) diff = 7; // 今天就是該週幾 → 推到下週，避免「立刻到期」
+        d.setDate(d.getDate() + diff);
+        d.setHours(23, 59, 59, 0);
+        return d;
+      }
+      case 'monthly': {
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        if (form.monthDay === 'eom') {
+          // 當月最後一天；若今天已是最後一天，推到下個月底
+          let last = new Date(y, m + 1, 0, 23, 59, 59);
+          if (now.getDate() === last.getDate()) {
+            last = new Date(y, m + 2, 0, 23, 59, 59);
+          }
+          return last;
+        }
+        const day = parseInt(form.monthDay) || 1; // 1/5/10/15/20/25（皆<=28，無2月問題）
+        let candidate = new Date(y, m, day, 23, 59, 59);
+        if (candidate.getTime() <= now.getTime()) {
+          candidate = new Date(y, m + 1, day, 23, 59, 59);
+        }
+        return candidate;
+      }
+      default: {
+        // once: 1-365 天後
+        const days = Math.min(365, Math.max(1, parseInt(form.dueDays) || 1));
+        return new Date(now.getTime() + days * 86400000);
+      }
     }
   };
 
@@ -531,7 +560,7 @@ function CreateTaskModal({
     }
     try {
       const now = firestore.Timestamp.now();
-      const periodEnd = getPeriodEnd(form.frequency, form.dueDays);
+      const periodEnd = getPeriodEnd();
       const dueDate = firestore.Timestamp.fromDate(periodEnd);
       const graceDays = parseInt(form.graceDays) || 2;
       const gracePeriodEnd = firestore.Timestamp.fromDate(
@@ -575,6 +604,8 @@ function CreateTaskModal({
         reviewMode: 'semi_auto',
         graceDays: '2',
         dueDays: '1',
+        weekday: '1',
+        monthDay: '1',
       });
       onClose();
     } catch (e: any) {
@@ -683,26 +714,85 @@ function CreateTaskModal({
                 {form.frequency === 'once' && (
                   <>
                     <Label color={P.muted} style={{ marginTop: spacing.md }}>
-                      截止幾天後
+                      幾天後截止（1-365）
+                    </Label>
+                    <TextInput
+                      style={modalStyles.input}
+                      placeholder="例：7"
+                      placeholderTextColor={P.muted}
+                      value={form.dueDays}
+                      onChangeText={(v) => {
+                        const n = v.replace(/[^0-9]/g, '');
+                        setForm((s) => ({ ...s, dueDays: n }));
+                      }}
+                      keyboardType="numeric"
+                      maxLength={3}
+                    />
+                  </>
+                )}
+
+                {form.frequency === 'daily' && (
+                  <Muted style={{ marginTop: spacing.md, fontSize: 12 }}>
+                    每天截止於當天結束
+                  </Muted>
+                )}
+
+                {form.frequency === 'weekly' && (
+                  <>
+                    <Label color={P.muted} style={{ marginTop: spacing.md }}>
+                      每週幾截止
                     </Label>
                     <View style={modalStyles.optRow}>
-                      {['1', '2', '3', '7'].map((d) => {
-                        const on = form.dueDays === d;
+                      {[
+                        { v: '1', l: '一' },
+                        { v: '2', l: '二' },
+                        { v: '3', l: '三' },
+                        { v: '4', l: '四' },
+                        { v: '5', l: '五' },
+                        { v: '6', l: '六' },
+                        { v: '7', l: '日' },
+                      ].map((d) => {
+                        const on = form.weekday === d.v;
                         return (
                           <Pressable
-                            key={d}
-                            onPress={() =>
-                              setForm((s) => ({ ...s, dueDays: d }))
-                            }
+                            key={d.v}
+                            onPress={() => setForm((s) => ({ ...s, weekday: d.v }))}
                             style={[modalStyles.opt, on && modalStyles.optOn]}
                           >
-                            <Label
-                              style={{
-                                color: on ? P.bg : P.text,
-                                fontSize: 12,
-                              }}
-                            >
-                              {d} 天
+                            <Label style={{ color: on ? P.bg : P.text, fontSize: 12 }}>
+                              {d.l}
+                            </Label>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
+
+                {form.frequency === 'monthly' && (
+                  <>
+                    <Label color={P.muted} style={{ marginTop: spacing.md }}>
+                      每月幾號截止
+                    </Label>
+                    <View style={modalStyles.optRow}>
+                      {[
+                        { v: '1', l: '1號' },
+                        { v: '5', l: '5號' },
+                        { v: '10', l: '10號' },
+                        { v: '15', l: '15號' },
+                        { v: '20', l: '20號' },
+                        { v: '25', l: '25號' },
+                        { v: 'eom', l: '月底' },
+                      ].map((d) => {
+                        const on = form.monthDay === d.v;
+                        return (
+                          <Pressable
+                            key={d.v}
+                            onPress={() => setForm((s) => ({ ...s, monthDay: d.v }))}
+                            style={[modalStyles.opt, on && modalStyles.optOn]}
+                          >
+                            <Label style={{ color: on ? P.bg : P.text, fontSize: 12 }}>
+                              {d.l}
                             </Label>
                           </Pressable>
                         );
