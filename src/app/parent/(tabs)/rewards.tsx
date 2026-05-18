@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { RewardItem, RewardOrder } from '../../../types/models';
+import { resolveMemberDisplay } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -124,11 +125,12 @@ export default function ParentRewards() {
             itemTitle = itemDoc.data()?.title || '';
           } catch {}
           try {
-            const userDoc = await firestore()
-              .collection('users')
-              .doc(order.userId)
-              .get();
-            childName = userDoc.data()?.displayName || '';
+            const r = await resolveMemberDisplay(
+              familyId as string,
+              order.userId,
+              ''
+            );
+            childName = r.name;
           } catch {}
           list.push({ order, itemTitle, childName });
         }

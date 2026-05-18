@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { Task, TaskInstance } from '../../../types/models';
+import { memberName } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -145,14 +146,15 @@ export default function ParentTasks() {
         if (!snap) return;
         const kids = await Promise.all(
           snap.docs.map(async (d) => {
-            const userId = d.data().userId;
+            const membership = d.data();
+            const userId = membership.userId;
             const userDoc = await firestore()
               .collection('users')
               .doc(userId)
               .get();
             return {
               id: userId,
-              name: userDoc.data()?.displayName || '小朋友',
+              name: memberName(membership as any, userDoc.data() as any, '小朋友'),
             };
           })
         );

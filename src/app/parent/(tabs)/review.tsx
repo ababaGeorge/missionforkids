@@ -22,6 +22,7 @@ import type {
   RewardItem,
 } from '../../../types/models';
 import { useFamily } from '../../../hooks/useFamily';
+import { resolveMemberDisplay } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -132,16 +133,17 @@ export default function ParentReview() {
             .doc(instance.taskId)
             .get();
           const taskData = taskDoc.data();
-          const userDoc = await firestore()
-            .collection('users')
-            .doc(instance.userId)
-            .get();
+          const { name: childName } = await resolveMemberDisplay(
+            family.id,
+            instance.userId,
+            '小朋友'
+          );
           list.push({
             instance,
             submission,
             taskTitle: taskData?.title || '—',
             taskPoints: taskData?.points || 0,
-            childName: userDoc.data()?.displayName || '小朋友',
+            childName,
           });
         }
         setReviewTasks(list);
@@ -165,16 +167,17 @@ export default function ParentReview() {
             .doc(order.itemId)
             .get();
           const itemData = itemDoc.data();
-          const userDoc = await firestore()
-            .collection('users')
-            .doc(order.userId)
-            .get();
+          const { name: childName } = await resolveMemberDisplay(
+            family.id,
+            order.userId,
+            '小朋友'
+          );
           list.push({
             order,
             item: itemData
               ? ({ id: itemDoc.id, ...itemData } as RewardItem)
               : null,
-            childName: userDoc.data()?.displayName || '小朋友',
+            childName,
           });
         }
         setReviewOrders(list);

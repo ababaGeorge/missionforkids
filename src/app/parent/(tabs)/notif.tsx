@@ -5,6 +5,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { TaskInstance, RewardOrder } from '../../../types/models';
 import { useFamily } from '../../../hooks/useFamily';
+import { resolveMemberDisplay } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Display, H3, Label, Muted, Data } from '../../../design/Text';
@@ -73,15 +74,15 @@ export default function ParentNotif() {
         for (const doc of snap.docs) {
           try {
             const inst = { id: doc.id, ...doc.data() } as TaskInstance;
-            const [taskDoc, userDoc] = await Promise.all([
+            const [taskDoc, member] = await Promise.all([
               firestore().collection('tasks').doc(inst.taskId).get(),
-              firestore().collection('users').doc(inst.userId).get(),
+              resolveMemberDisplay(familyId, inst.userId, '孩子'),
             ]);
             items.push({
               id: `task_${doc.id}`,
               kind: 'task_submitted',
               title: taskDoc.data()?.title ?? '任務',
-              childName: userDoc.data()?.displayName ?? '孩子',
+              childName: member.name,
               points: taskDoc.data()?.points ?? null,
               sortDate: inst.periodEnd,
             });
@@ -111,15 +112,15 @@ export default function ParentNotif() {
         for (const doc of snap.docs) {
           try {
             const order = { id: doc.id, ...doc.data() } as RewardOrder;
-            const [itemDoc, userDoc] = await Promise.all([
+            const [itemDoc, member] = await Promise.all([
               firestore().collection('rewardItems').doc(order.itemId).get(),
-              firestore().collection('users').doc(order.userId).get(),
+              resolveMemberDisplay(familyId, order.userId, '孩子'),
             ]);
             items.push({
               id: `order_${doc.id}`,
               kind: 'reward_ordered',
               title: itemDoc.data()?.title ?? '獎勵',
-              childName: userDoc.data()?.displayName ?? '孩子',
+              childName: member.name,
               points: order.pointCostSnapshot,
               sortDate: order.createdAt,
             });

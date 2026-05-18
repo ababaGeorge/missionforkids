@@ -19,6 +19,7 @@ import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import type { Family, FamilyMembership, User } from '../../../types/models';
 import { createInviteCode, createParentInviteCode } from '../../../lib/inviteCode';
+import { resolveMemberUser } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -106,9 +107,8 @@ export default function FamilyScreen() {
         const rows: MemberRow[] = [];
         for (const d of snap.docs) {
           const mem = { id: d.id, ...d.data() } as FamilyMembership;
-          const udoc = await firestore().collection('users').doc(mem.userId).get();
-          const ud = udoc.data();
-          if (ud) rows.push({ membership: mem, user: { id: udoc.id, ...ud } as User });
+          const u = await resolveMemberUser(mem.userId);
+          if (u) rows.push({ membership: mem, user: u });
         }
         setMembers(rows);
       });
@@ -672,8 +672,8 @@ export default function FamilyScreen() {
                   placeholder="點數"
                   placeholderTextColor={P.muted}
                   value={grantAmount}
-                  onChangeText={setGrantAmount}
-                  keyboardType="numeric"
+                  onChangeText={(t) => setGrantAmount(t.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
                   autoFocus
                 />
                 <TextInput
