@@ -1,4 +1,5 @@
 import firestore from '@react-native-firebase/firestore';
+import functions from '@react-native-firebase/functions';
 
 /**
  * 產生 6 位英數邀請碼（大寫，排除易混淆字元 0OIL1）
@@ -64,79 +65,28 @@ export interface InviteCodeData {
 }
 
 /**
- * 驗證並兌換邀請碼
- * - 檢查碼是否存在、未使用、未過期
- * - 孩子碼：將 authUid 寫入 child user doc 的 authProviderId
- * - 家長碼：將 authUid 加入家庭成員
- * - 標記碼為已使用
+ * 驗證並兌換邀請碼。
+ *
+ * 改為呼叫 server-side callable `redeemInvite`：client 端被 firestore rule
+ * `users update: request.auth.uid == userId` 擋住，無法把 authUid 寫進家長
+ * 建的 placeholder child user doc（小孩永遠綁不上 QQ/RR）。綁定改在
+ * function 內用 admin 權限做。簽名與回傳、錯誤碼（INVALID_CODE /
+ * CODE_USED / CODE_EXPIRED）維持不變，呼叫端不用改。
+ *
+ * authUid 參數保留以維持簽名相容；實際身分由 function 從 request.auth 取，
+ * 不信任 client 傳入。
  */
 export async function redeemInviteCode(
   code: string,
-  authUid: string
+  _authUid: string
 ): Promise<InviteCodeData> {
-  const codeDoc = await firestore()
-    .collection('inviteCodes')
-    .doc(code.toUpperCase())
-    .get();
-
-  if (!codeDoc.exists) {
-    throw new Error('INVALID_CODE');
+  try {
+    const fn = functions().httpsCallable('redeemInvite');
+    const res = await fn({ code: code.toUpperCase() });
+    return res.data as InviteCodeData;
+  } catch (e: any) {
+    // HttpsError 的 message 會原樣帶回（INVALID_CODE / CODE_USED /
+    // CODE_EXPIRED），呼叫端用 error.message 比對，維持原行為。
+    throw new Error(e?.message || 'INVALID_CODE');
   }
-
-  const data = codeDoc.data()!;
-
-  if (data.used) {
-    throw new Error('CODE_USED');
-  }
-
-  if (data.expiresAt.toDate() < new Date()) {
-    throw new Error('CODE_EXPIRED');
-  }
-
-  if (data.role === 'parent') {
-    // 家長碼：建立 membership，不建立 user doc（家長自己有帳號）
-    await firestore().collection('familyMemberships').doc(`${authUid}_${data.familyId}`).set({
-      familyId: data.familyId,
-      userId: authUid,
-      role: 'parent',
-      status: 'active',
-      invitedBy: data.invitedBy || null,
-      joinedAt: firestore.FieldValue.serverTimestamp(),
-    });
-  } else {
-    // 孩子碼：將 auth UID 寫入 child user doc
-    await firestore().collection('users').doc(data.childUserId).update({
-      authProviderId: authUid,
-    });
-    // 同時為真實 auth UID 建立 membership（rules 用 ${uid}_${familyId} 查 isFamilyMember，
-    // 否則 invited child 簽進來會 permission-denied 看不到任何 family 資料）。
-    await firestore()
-      .collection('familyMemberships')
-      .doc(`${authUid}_${data.familyId}`)
-      .set({
-        familyId: data.familyId,
-        userId: authUid,
-        role: 'child',
-        status: 'active',
-        invitedBy: null,
-        joinedAt: firestore.FieldValue.serverTimestamp(),
-      });
-    // 標記 placeholder membership（家長端建的）為 removed，避免重複顯示
-    try {
-      await firestore()
-        .collection('familyMemberships')
-        .doc(`${data.childUserId}_${data.familyId}`)
-        .update({ status: 'removed' });
-    } catch {
-      // placeholder 可能不存在（舊資料），忽略
-    }
-  }
-
-  // 標記碼為已使用
-  await codeDoc.ref.update({ used: true });
-
-  return {
-    childUserId: data.childUserId || authUid,
-    familyId: data.familyId,
-  };
 }

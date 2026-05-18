@@ -8,3 +8,4 @@ export { onRewardOrderCancelledOrRejected } from './onRewardOrderCancelledOrReje
 export { autoCompleteDeliveredOrders } from './autoCompleteDeliveredOrders';
 export { analyzePhoto } from './analyzePhoto';
 export { grantPoints } from './grantPoints';
+export { redeemInvite } from './redeemInvite';
