@@ -90,6 +90,7 @@ export default function ParentTasks() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [children, setChildren] = useState<{ id: string; name: string }[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskWithInstances | null>(null);
   const [filterChild, setFilterChild] = useState<string | null>(null);
 
   useEffect(() => {
@@ -290,6 +291,7 @@ export default function ParentTasks() {
                 return (
                   <Pressable
                     key={tw.task.id}
+                    onPress={() => { setEditingTask(tw); setShowCreate(true); }}
                     onLongPress={() => handleArchiveTask(tw.task.id)}
                     delayLongPress={800}
                     style={styles.taskCard}
@@ -447,10 +449,11 @@ export default function ParentTasks() {
 
       <CreateTaskModal
         visible={showCreate}
-        onClose={() => setShowCreate(false)}
+        onClose={() => { setShowCreate(false); setEditingTask(null); }}
         familyId={familyId}
         uid={uid}
         children={children}
+        editing={editingTask}
       />
     </SafeAreaView>
   );
@@ -474,12 +477,14 @@ function CreateTaskModal({
   familyId,
   uid,
   children,
+  editing,
 }: {
   visible: boolean;
   onClose: () => void;
   familyId: string | null;
   uid: string | undefined;
   children: { id: string; name: string }[];
+  editing?: TaskWithInstances | null;
 }) {
   const [form, setForm] = useState({
     title: '',
@@ -492,6 +497,63 @@ function CreateTaskModal({
     weekday: '1', // weekly: 1=一 ... 7=日
     monthDay: '1', // monthly: '1'|'5'|'10'|'15'|'20'|'25'|'eom'
   });
+
+  useEffect(() => {
+    if (!visible) return;
+    if (editing) {
+      const t = editing.task;
+      const due: Date =
+        typeof (t.dueDate as any)?.toDate === 'function'
+          ? (t.dueDate as any).toDate()
+          : new Date();
+      // 從現有 dueDate 反推選擇器值（近似還原）
+      let weekday = '1';
+      let monthDay = '1';
+      let dueDays = '1';
+      if (t.frequency === 'weekly') {
+        const js = due.getDay(); // 0=日..6=六
+        weekday = js === 0 ? '7' : String(js);
+      } else if (t.frequency === 'monthly') {
+        const lastDay = new Date(due.getFullYear(), due.getMonth() + 1, 0).getDate();
+        const dd = due.getDate();
+        if (dd === lastDay) monthDay = 'eom';
+        else if ([1, 5, 10, 15, 20, 25].includes(dd)) monthDay = String(dd);
+        else monthDay = '1';
+      } else if (t.frequency === 'once') {
+        const created: Date =
+          typeof (t.createdAt as any)?.toDate === 'function'
+            ? (t.createdAt as any).toDate()
+            : new Date();
+        const d = Math.round((due.getTime() - created.getTime()) / 86400000);
+        dueDays = String(Math.min(365, Math.max(1, d || 1)));
+      }
+      setForm({
+        title: t.title,
+        points: String(t.points),
+        selectedChildren: editing.instances
+          .map((i) => i.userId)
+          .filter((v, i, a) => a.indexOf(v) === i),
+        frequency: t.frequency,
+        reviewMode: t.reviewMode,
+        graceDays: String(t.graceDays ?? 2),
+        dueDays,
+        weekday,
+        monthDay,
+      });
+    } else {
+      setForm({
+        title: '',
+        points: '10',
+        selectedChildren: [],
+        frequency: 'once',
+        reviewMode: 'semi_auto',
+        graceDays: '2',
+        dueDays: '1',
+        weekday: '1',
+        monthDay: '1',
+      });
+    }
+  }, [visible, editing]);
 
   const toggleChild = (id: string) =>
     setForm((s) => ({
@@ -566,6 +628,53 @@ function CreateTaskModal({
       const gracePeriodEnd = firestore.Timestamp.fromDate(
         new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
       );
+
+      if (editing) {
+        // 編輯模式：更新 task 欄位 + 對帳 instances（加/移除指派的孩子）
+        await firestore().collection('tasks').doc(editing.task.id).update({
+          title: form.title.trim(),
+          points: parseInt(form.points) || 10,
+          frequency: form.frequency,
+          dueDate,
+          graceDays,
+          reviewMode: form.reviewMode,
+          assigneeType: assignees.length > 1 ? 'family' : 'individual',
+          assigneeUserId: assignees.length === 1 ? assignees[0] : null,
+        });
+        const existingByUser = new Map(
+          editing.instances.map((i) => [i.userId, i])
+        );
+        // 新增的孩子 → 建新 pending instance
+        for (const childId of assignees) {
+          if (!existingByUser.has(childId)) {
+            await firestore().collection('taskInstances').add({
+              taskId: editing.task.id,
+              userId: childId,
+              familyId,
+              periodStart: now,
+              periodEnd: dueDate,
+              gracePeriodEnd,
+              status: 'pending',
+              submissionCount: 0,
+              reviewedBy: null,
+              reviewedAt: null,
+              pointsAwarded: null,
+            });
+          }
+        }
+        // 被移除的孩子 → instance 標 missed（保留歷史，不刪）
+        for (const inst of editing.instances) {
+          if (!assignees.includes(inst.userId) && inst.status !== 'missed') {
+            await firestore()
+              .collection('taskInstances')
+              .doc(inst.id)
+              .update({ status: 'missed' });
+          }
+        }
+        onClose();
+        return;
+      }
+
       const taskRef = await firestore().collection('tasks').add({
         familyId,
         title: form.title.trim(),
@@ -609,7 +718,7 @@ function CreateTaskModal({
       });
       onClose();
     } catch (e: any) {
-      Alert.alert('建立失敗', e?.message || '不明錯誤');
+      Alert.alert(editing ? '儲存失敗' : '建立失敗', e?.message || '不明錯誤');
     }
   };
 
@@ -628,28 +737,32 @@ function CreateTaskModal({
             <View style={modalStyles.sheet}>
               <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
                 <H3 style={{ fontSize: 18, marginBottom: spacing.md }}>
-                  新增任務
+                  {editing ? '編輯任務' : '新增任務'}
                 </H3>
 
-                <Label color={P.muted} style={{ marginBottom: 6 }}>
-                  快速範本
-                </Label>
-                <View style={modalStyles.templateRow}>
-                  {TASK_TEMPLATES.map((t) => (
-                    <Pressable
-                      key={t.title}
-                      onPress={() => pickTemplate(t)}
-                      style={modalStyles.chip}
-                    >
-                      <Label style={{ color: P.primary, fontSize: 11 }}>
-                        {t.title}
-                      </Label>
-                      <Muted style={{ fontSize: 10, marginLeft: 4 }}>
-                        {t.points}
-                      </Muted>
-                    </Pressable>
-                  ))}
-                </View>
+                {!editing && (
+                  <>
+                    <Label color={P.muted} style={{ marginBottom: 6 }}>
+                      快速範本
+                    </Label>
+                    <View style={modalStyles.templateRow}>
+                      {TASK_TEMPLATES.map((t) => (
+                        <Pressable
+                          key={t.title}
+                          onPress={() => pickTemplate(t)}
+                          style={modalStyles.chip}
+                        >
+                          <Label style={{ color: P.primary, fontSize: 11 }}>
+                            {t.title}
+                          </Label>
+                          <Muted style={{ fontSize: 10, marginLeft: 4 }}>
+                            {t.points}
+                          </Muted>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </>
+                )}
 
                 <Label color={P.muted} style={{ marginTop: spacing.md }}>
                   任務名稱
@@ -870,7 +983,7 @@ function CreateTaskModal({
                       !form.title.trim() && { opacity: 0.5 },
                     ]}
                   >
-                    <Label style={{ color: P.bg }}>建立</Label>
+                    <Label style={{ color: P.bg }}>{editing ? '儲存' : '建立'}</Label>
                   </Pressable>
                 </View>
               </ScrollView>
