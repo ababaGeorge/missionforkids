@@ -561,9 +561,11 @@ export default function FamilyScreen() {
                         setGeneratedCode(null);
                         setShowAddChild(false);
                       }}
-                      style={modalStyles.save}
+                      style={modalStyles.fullBtn}
                     >
-                      <Label style={{ color: P.bg }}>完成</Label>
+                      <Label style={{ color: P.bg, fontSize: 15, fontWeight: '800' }}>
+                        完成
+                      </Label>
                     </Pressable>
                   </>
                 ) : (
@@ -786,5 +788,13 @@ const modalStyles = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: P.primary,
     alignItems: 'center',
+  },
+  fullBtn: {
+    paddingVertical: 16,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.sm,
   },
 });
