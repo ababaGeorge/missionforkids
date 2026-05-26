@@ -171,6 +171,11 @@ export default function SignIn() {
   const [showInviteCode, setShowInviteCode] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [familyName, setFamilyName] = useState('');
 
   const handleGoogleSignIn = async () => {
     Alert.alert(
@@ -184,6 +189,38 @@ export default function SignIn() {
       'Apple Sign-In',
       'Apple Developer 帳號驗證中，請先用 Google 登入。'
     );
+  };
+
+  const handleEmailSignIn = async () => {
+    if (!email.trim() || !password) return;
+    try {
+      setLoading(true);
+      await auth().signInWithEmailAndPassword(email.trim(), password);
+      router.replace('/');
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? '登入失敗');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEmailSignUp = async () => {
+    if (!email.trim() || !password || !displayName.trim() || !familyName.trim()) return;
+    try {
+      setLoading(true);
+      const { registerParent } = await import('../../lib/auth/registerParent');
+      await registerParent({
+        email: email.trim(),
+        password,
+        displayName: displayName.trim(),
+        familyName: familyName.trim(),
+      });
+      router.replace('/');
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? '註冊失敗');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleJoinWithCode = async () => {
@@ -508,6 +545,66 @@ export default function SignIn() {
               <BodySm style={styles.subtitle}>Mission for Kids</BodySm>
 
               <View style={styles.buttonGroup}>
+                <View style={{ gap: spacing.sm, width: '100%' }}>
+                  <TextInput
+                    testID="email-input"
+                    placeholder="Email"
+                    placeholderTextColor={P.muted}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    autoComplete="email"
+                    textContentType="emailAddress"
+                    value={email}
+                    onChangeText={setEmail}
+                    style={styles.input}
+                  />
+                  <TextInput
+                    testID="password-input"
+                    placeholder="密碼"
+                    placeholderTextColor={P.muted}
+                    secureTextEntry
+                    autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                    textContentType={authMode === 'signup' ? 'newPassword' : 'password'}
+                    value={password}
+                    onChangeText={setPassword}
+                    style={styles.input}
+                  />
+                  {authMode === 'signup' && (
+                    <>
+                      <TextInput
+                        testID="displayname-input"
+                        placeholder="你的暱稱"
+                        placeholderTextColor={P.muted}
+                        value={displayName}
+                        onChangeText={setDisplayName}
+                        style={styles.input}
+                      />
+                      <TextInput
+                        testID="familyname-input"
+                        placeholder="家庭名稱"
+                        placeholderTextColor={P.muted}
+                        value={familyName}
+                        onChangeText={setFamilyName}
+                        style={styles.input}
+                      />
+                    </>
+                  )}
+                  <Pressable
+                    testID="email-submit"
+                    onPress={authMode === 'signin' ? handleEmailSignIn : handleEmailSignUp}
+                    disabled={loading}
+                    style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+                  >
+                    <AppText style={styles.inviteButtonText}>{authMode === 'signin' ? '登入' : '註冊並建立家庭'}</AppText>
+                  </Pressable>
+                  <Pressable
+                    testID="toggle-auth-mode"
+                    onPress={() => setAuthMode((m) => (m === 'signin' ? 'signup' : 'signin'))}
+                  >
+                    <BodySm style={{ color: P.muted, textAlign: 'center' }}>{authMode === 'signin' ? '沒有帳號？註冊' : '已有帳號？登入'}</BodySm>
+                  </Pressable>
+                </View>
+
                 <Label style={styles.sectionLabel}>{t('auth.parentSignIn')}</Label>
 
                 <Pressable
@@ -683,6 +780,23 @@ const styles = StyleSheet.create({
   buttonGroup: {
     width: '100%',
     gap: spacing.sm,
+  },
+  input: {
+    backgroundColor: P.surface,
+    borderWidth: 1,
+    borderColor: P.border,
+    borderRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    color: P.text,
+    fontSize: 15,
+  },
+  primaryBtn: {
+    backgroundColor: P.primary,
+    borderRadius: radius.full,
+    paddingVertical: 14,
+    alignItems: 'center',
+    ...shadow.glow,
   },
   button: {
     paddingVertical: 14,
