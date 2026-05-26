@@ -108,3 +108,17 @@ Project: missionforkids — 帳號系統 Plan A 測試依賴相容性
 - 兩邊各跑一次 smoke test（Plan A Task 0.1 Step 6 / 0.3 Step 6）確認基建會動。
 
 **不變動：** 現有 App 與 Functions 的執行期依賴（expo/react/RN/RNFB/firebase-functions/admin）皆已驗證就緒，本次不升不降。
+
+---
+
+## 修正（實裝後，2026-05-26）
+
+實際安裝時發現本報告原本對 react-server-dom-webpack 的建議有誤，已更正並驗證：
+
+- **原誤判**：建議補裝 `react-server-dom-webpack@~19.1.5` 滿足 jest-expo 54 的 peer。實際上 rsdw 19.1.5 要求 `react ^19.1.5`，與 App 鎖的 `react 19.1.0` 衝突 → 嚴格 `npm ci` 失敗。
+- **正解（已採用並驗證）**：
+  - **pin `jest-expo@54.0.13`**（54.x 線最後一個搭配時 npm 會把 rsdw 自動解到相容版本的；不要用 `npx expo install`，它抓 54.0.17）。
+  - **不手動安裝 react-server-dom-webpack** —— 它是 expo-router 的 *peerOptional*，npm 會自動解到 **19.0.6**（相容 react 19.1.0）。
+  - **不使用 `.npmrc legacy-peer-deps=true`** —— 保持專案嚴格 peer 檢查。
+- **驗證**：移除 .npmrc + rsdw 手動 pin、清 lock 重裝後，`npm ci`（= EAS Build 指令）**EXIT 0**、RN smoke test 通過。EAS 安全。
+- Plan A Task 0.3 安裝指令已同步更新為上述正解。
