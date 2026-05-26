@@ -187,6 +187,7 @@ export default function FamilyScreen() {
         authProvider: 'anonymous',
         authProviderId: '',
         roleType: 'child',
+        email: null,
         birthday: null,
         createdAt: firestore.FieldValue.serverTimestamp(),
       });

@@ -8,9 +8,10 @@ export interface User {
   id: string;
   displayName: string;
   avatarUrl: string | null;
-  authProvider: 'apple' | 'google' | 'anonymous';
+  authProvider: 'apple' | 'google' | 'password' | 'anonymous';
   authProviderId: string;
   roleType: 'parent' | 'child';
+  email: string | null;
   birthday: Timestamp | null;
   createdAt: Timestamp;
 }
