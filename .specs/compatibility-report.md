@@ -122,3 +122,98 @@ Project: missionforkids — 帳號系統 Plan A 測試依賴相容性
   - **不使用 `.npmrc legacy-peer-deps=true`** —— 保持專案嚴格 peer 檢查。
 - **驗證**：移除 .npmrc + rsdw 手動 pin、清 lock 重裝後，`npm ci`（= EAS Build 指令）**EXIT 0**、RN smoke test 通過。EAS 安全。
 - Plan A Task 0.3 安裝指令已同步更新為上述正解。
+
+---
+
+# Plan B 相容性附錄（2026-05-26）
+
+範圍：Plan B 新增的兩塊外部串接 —— **Resend 交易寄信** 與 **Expo deep link**。Plan A 既有依賴不重驗。結論：**核心後端（邀請函式 + 資料模型 + 接受流程）可立即用 emulator + TDD 開發，零新增執行期阻擋**；真正寄信與「未裝 App 落地」需要使用者層級的外部設定，但**不擋後端開發**。
+
+## Plan B Dependency Map（新增）
+
+| 類別 | 項目 | 角色 | 驗證後結論 |
+|---|---|---|---|
+| 交易寄信 | Resend API | Cloud Function 寄邀請信 | 用 **raw fetch**（node 22 內建）打 `https://api.resend.com/emails`，零新增 dep；或選裝 `resend@^6.12.3` SDK（見 Decision B1） |
+| 密鑰管理 | `RESEND_API_KEY` | Resend 金鑰 | `defineSecret('RESEND_API_KEY')`，**與既有 `OPENAI_API_KEY`（`functions/src/analyzePhoto.ts`）完全同一模式** |
+| Deep link（scheme） | `missionforkids://` | 接住邀請連結 | **app.json 已設 `scheme: "missionforkids"`**；`expo-linking ~8.0.11` + `expo-router ~6.0.23` 已裝 → Phase 1 測試免新增安裝/build |
+| Deep link（universal） | iOS Universal Link / Android App Link | 「未裝 App 先到下載頁」 | 需 hosted AASA/assetlinks + 原生設定 + 新 EAS build → **延後到上線前**，Phase 1 不需要 |
+
+## Local / 現況查證
+
+| 項目 | 需求 | 現況 | 狀態 |
+|---|---|---|---|
+| functions node engine | 22 | `functions/package.json` engines.node = "22" | ✅ |
+| firebase-functions | v2 secrets API | ^6.3.0（`defineSecret` 已實際使用中） | ✅ |
+| Functions 寄信前例 | 外部 API + secret | `analyzePhoto.ts` 用 `defineSecret('OPENAI_API_KEY')` + `secrets:[...]` + `.value()` | ✅ 直接照抄 |
+| node 22 global fetch | raw 呼叫 Resend | node 22 內建 `fetch` | ✅ 免裝 SDK |
+| app scheme | 自訂 scheme | app.json `scheme: "missionforkids"` | ✅ 已設 |
+| expo-linking / expo-router | deep link 路由 | `~8.0.11` / `~6.0.23` 已裝 | ✅ |
+
+## Service Specifications
+
+### Resend（交易寄信）
+- 官方 SDK：`resend`，最新 `6.12.3`（fetch-based，node 18+，node 22 OK）。
+- 寄信（SDK 寫法）：`new Resend(key).emails.send({ from, to, subject, html })`。
+- 寄信（raw，無 dep）：`POST https://api.resend.com/emails`，`Authorization: Bearer <key>`，JSON body 同上欄位。
+- **測試免驗證網域**：`from: 'onboarding@resend.dev'` 官方允許測試用（不需驗證自有網域）。上線前才需驗證自有寄件網域。
+- 免費額度 3000/月、100/天。
+- 來源：https://resend.com/docs/send-with-nodejs
+
+### Firebase Functions Secret（金鑰）
+- v2 模式：`import { defineSecret } from 'firebase-functions/params'` → `const key = defineSecret('RESEND_API_KEY')` → onCall `{ secrets: [key] }` → 函式內 `key.value()`。
+- **本專案已在用**（`analyzePhoto.ts`），無新機制風險。
+- 本機 emulator 測試：functions 目錄放 `.secret.local`（或 `.env`）提供 `RESEND_API_KEY`；**不進 git**。
+- 上線設定：`firebase functions:secrets:set RESEND_API_KEY`（使用者層級，需登入，走 `!` 前綴）。
+- 來源：https://firebase.google.com/docs/functions/config-env
+
+### Expo Deep Link（SDK 54）
+- 自訂 scheme `missionforkids://` 已設 → expo-router 自動把 deep link 對應到路由（例如 `/invite/[inviteId]`）。
+- 開發測試：`npx uri-scheme open missionforkids://invite/<id> --ios`（dev build 即可，免額外設定）。
+- Universal/App Link（https、未裝落地）：需 iOS `associatedDomains` + 主機放 `apple-app-site-association`；Android `intentFilters` + 主機放 `assetlinks.json`。**改 app.json 原生設定 → 需重跑 EAS build**。→ 延後上線前。
+- 來源：https://docs.expo.dev/linking/into-your-app/
+
+## Cross-Compatibility
+
+| A | B | 狀態 | Notes |
+|---|---|---|---|
+| Resend raw fetch | node 22 functions runtime | ✅ | 內建 fetch，零 dep |
+| `resend` SDK 6.12.3 | node 22 | ✅ | fetch-based，無原生模組 |
+| Resend 新增（若裝 SDK） | EAS Build | ✅ 無影響 | **functions 依賴與 RN bundle 分離**，EAS 只建 RN App，不碰 functions deps → 無 peer 風險 |
+| `defineSecret` | firebase-functions ^6.3.0 | ✅ | 已實際運作 |
+| 自訂 scheme deep link | expo-router ~6.0.23 | ✅ | 已裝，免新增 |
+| Universal Link | 現有 EAS build | ⚠️ 需重 build | 改原生設定才生效；Phase 1 用 scheme 規避 |
+
+## Decisions & Conflicts
+
+### Decision B1：Resend 用 raw fetch 還是官方 SDK？（新依賴決策，待使用者定）
+- **Problem**：寄信可用 node 22 內建 `fetch`（零新增 dep），或裝 `resend@^6.12.3` SDK（較順手、型別好）。
+- **權衡**：raw fetch = 零依賴、符合 spec「直接呼叫 Resend API」字面、就一個 POST；SDK = 官方、ergonomic、與既有 `openai` dep 風格一致，但多一個 functions 依賴。
+- **建議**：**raw fetch**（零新增依賴、符合使用者「避免不必要依賴」偏好、實作僅一個小 helper）。SDK 為備案。
+- **Action**：寫 Plan B 計畫時把寄信封成 `functions/src/lib/sendInviteEmail.ts` 介面，內部 raw fetch；先以可注入 mock 的形式讓 `createFamilyInvite` 測試不需真網路。**此為新依賴方向，計畫定稿前向使用者確認。**
+
+### Decision B2：Phase 1 deep link 只用自訂 scheme
+- **Problem**：設計提到「未裝 App 先到下載頁」（universal link 行為），但 universal link 需 hosting + 原生設定 + 重 build。
+- **建議**：**Phase 1 只用已設好的 `missionforkids://` 自訂 scheme**（接受流程測試足夠）；universal link 落地延後上線前。
+- **Action**：Plan B 計畫的接受流程用 scheme 路由；universal link 列為上線前外部設定，不寫進 Plan B 程式任務。
+
+### 無阻擋型衝突
+Resend / deep link 皆無與既有依賴的版本衝突。
+
+## Implementation Constraints（Plan B 實作硬性遵守）
+
+- **寄信**：node 22 raw `fetch` 打 Resend REST（除非使用者選 SDK）。封成單一 `sendInviteEmail` 介面，可注入 mock；測試不打真網路。
+- **金鑰**：`defineSecret('RESEND_API_KEY')` + onCall `secrets:[...]` + `.value()`，照 `analyzePhoto.ts`。本機 emulator 用 `functions/.secret.local`（git 忽略）。
+- **寄信失敗不擋邀請**：依設計，`createFamilyInvite` 先建 `familyInvites` doc（transaction），再嘗試寄信；寄信 throw 不 rollback invite，回傳「可重寄」。
+- **Deep link**：用既有 `missionforkids://` scheme + expo-router 路由（如 `/invite/[inviteId]`）。**不改 app.json 原生 linking 設定**（不觸發重 build）。universal link 延後。
+- **資料模型**：新增 `familyInvites` collection + `FamilyInvite` type；`childId` 欄位（小孩帳號）依設計在 `acceptFamilyInvite` 產生並釘錢包 `{familyId}_{childId}`。
+- **不變動**：Plan A 既有依賴與設定。
+
+## 外部前置（使用者層級，不擋後端 TDD 開發）
+
+| 項目 | 何時需要 | 誰做 |
+|---|---|---|
+| Resend 帳號 + API key | 真正寄信驗證前（後端 TDD 可先 mock） | 使用者註冊 resend.com 拿 key |
+| `RESEND_API_KEY` secret 設定 | 部署寄信函式前 | `! firebase functions:secrets:set RESEND_API_KEY`（走 `!` 前綴） |
+| Firebase 啟用 Email/Password | 真機端到端測試前 | 使用者在 Console 開 |
+| 自有寄件網域驗證 | 上線前 | 使用者在 Resend 驗證 |
+| Universal link hosting + 原生設定 | 上線前（未裝落地） | 需重 EAS build |
