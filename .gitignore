@@ -43,3 +43,8 @@ functions/lib/
 /ios
 /android
 .claude/skills/gstack/
+
+# Firebase emulator logs
+firestore-debug.log
+functions/firestore-debug.log
+firebase-debug.log
