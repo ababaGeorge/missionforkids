@@ -5,7 +5,7 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "deploy": "firebase deploy --only functions",
-    "test": "firebase emulators:exec --only firestore,auth 'jest --runInBand'"
+    "test": "firebase emulators:exec --only firestore,auth 'jest --runInBand --forceExit'"
   },
   "engines": {
     "node": "22"
