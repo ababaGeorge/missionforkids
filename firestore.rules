@@ -54,6 +54,15 @@ service cloud.firestore {
       allow update: if isSignedIn();
     }
 
+    // ========== Family Invites（email 邀請）==========
+    // inviteId 為隨機不可猜 doc id（= 邀請連結秘密）。允許單 doc get（接受畫面 pre-auth 顯示），
+    // 禁 list；寫入只走 Cloud Functions (admin)。
+    match /familyInvites/{inviteId} {
+      allow get: if true;
+      allow list: if false;
+      allow write: if false;
+    }
+
     // ========== Tasks ==========
     // 只有同家庭的成員可以存取
     match /tasks/{taskId} {
