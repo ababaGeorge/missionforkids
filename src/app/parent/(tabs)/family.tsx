@@ -19,6 +19,7 @@ import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import type { Family, FamilyMembership, User } from '../../../types/models';
 import { createInviteCode, createParentInviteCode } from '../../../lib/inviteCode';
+import { createFamilyInvite } from '../../../lib/familyInvite';
 import { resolveMemberUser } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
@@ -69,6 +70,10 @@ export default function FamilyScreen() {
   const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [showInviteEmail, setShowInviteEmail] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviting, setInviting] = useState(false);
   const [showGrant, setShowGrant] = useState(false);
   const [grantTarget, setGrantTarget] = useState<{ userId: string; name: string } | null>(null);
   const [grantAmount, setGrantAmount] = useState('10');
@@ -207,6 +212,29 @@ export default function FamilyScreen() {
       setChildName('');
     } catch (e: any) {
       Alert.alert('錯誤', e.message || '加入失敗');
+    }
+  };
+
+  const handleInviteByEmail = async () => {
+    if (!family || !inviteEmail.trim() || !inviteName.trim()) return;
+    try {
+      setInviting(true);
+      const { emailSent } = await createFamilyInvite({
+        familyId: family.id,
+        email: inviteEmail.trim(),
+        childName: inviteName.trim(),
+      });
+      setInviteEmail('');
+      setInviteName('');
+      setShowInviteEmail(false);
+      Alert.alert(
+        '邀請已送出',
+        emailSent ? '邀請信已寄出，請小孩查看信箱。' : '邀請已建立，但寄信失敗，稍後可重寄。'
+      );
+    } catch (e: any) {
+      Alert.alert('邀請失敗', e?.message ?? '請重試');
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -547,6 +575,7 @@ export default function FamilyScreen() {
         onPress={() => {
           Alert.alert('邀請成員', '', [
             { text: '加入小孩', onPress: () => setShowAddChild(true) },
+            { text: '用 Email 邀請小孩', onPress: () => setShowInviteEmail(true) },
             { text: '邀請家長', onPress: handleInviteParent },
             { text: '取消', style: 'cancel' },
           ]);
@@ -626,6 +655,58 @@ export default function FamilyScreen() {
                     </View>
                   </>
                 )}
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Invite child by email */}
+      <Modal visible={showInviteEmail} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={modalStyles.overlay}>
+              <View style={modalStyles.sheet}>
+                <H3 style={{ marginBottom: spacing.md }}>用 Email 邀請小孩</H3>
+                <TextInput
+                  testID="invite-child-name"
+                  style={modalStyles.input}
+                  placeholder="小孩姓名"
+                  placeholderTextColor={P.muted}
+                  value={inviteName}
+                  onChangeText={setInviteName}
+                />
+                <TextInput
+                  testID="invite-child-email"
+                  style={modalStyles.input}
+                  placeholder="小孩 Email"
+                  placeholderTextColor={P.muted}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoComplete="email"
+                  textContentType="emailAddress"
+                  value={inviteEmail}
+                  onChangeText={setInviteEmail}
+                />
+                <View style={modalStyles.actions}>
+                  <Pressable
+                    onPress={() => setShowInviteEmail(false)}
+                    style={modalStyles.cancel}
+                  >
+                    <Label style={{ color: P.muted }}>取消</Label>
+                  </Pressable>
+                  <Pressable
+                    testID="invite-child-submit"
+                    onPress={handleInviteByEmail}
+                    disabled={inviting}
+                    style={modalStyles.save}
+                  >
+                    <Label style={{ color: P.bg }}>送出邀請</Label>
+                  </Pressable>
+                </View>
               </View>
             </View>
           </TouchableWithoutFeedback>
