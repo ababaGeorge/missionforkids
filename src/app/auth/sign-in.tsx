@@ -168,8 +168,6 @@ async function seedDevOrder(familyId: string, childUid: string) {
 export default function SignIn() {
   const { t } = useTranslation();
   const router = useRouter();
-  const [showInviteCode, setShowInviteCode] = useState(false);
-  const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -218,27 +216,6 @@ export default function SignIn() {
       router.replace('/');
     } catch (e: any) {
       Alert.alert(t('common.error'), e?.message ?? '註冊失敗');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleJoinWithCode = async () => {
-    if (!inviteCode.trim()) return;
-
-    try {
-      setLoading(true);
-      const cred = await auth().signInAnonymously();
-      const uid = cred.user.uid;
-      await redeemInviteCode(inviteCode.trim(), uid);
-      router.replace('/child/(tabs)/tasks');
-    } catch (error: any) {
-      await auth().signOut();
-      let message = error.message;
-      if (error.message === 'INVALID_CODE') message = '邀請碼無效 / Invalid code';
-      if (error.message === 'CODE_USED') message = '邀請碼已使用 / Code already used';
-      if (error.message === 'CODE_EXPIRED') message = '邀請碼已過期 / Code expired';
-      Alert.alert(t('common.error'), message);
     } finally {
       setLoading(false);
     }
@@ -633,72 +610,6 @@ export default function SignIn() {
                   </AppText>
                 </Pressable>
 
-                <Label style={[styles.sectionLabel, { marginTop: spacing.lg }]}>
-                  {t('auth.childJoin')}
-                </Label>
-
-                {showInviteCode ? (
-                  <View style={styles.inviteCodeSection}>
-                    <TextInput
-                      style={styles.codeInput}
-                      placeholder="XXXXXX"
-                      placeholderTextColor={P.muted}
-                      value={inviteCode}
-                      onChangeText={(text) => setInviteCode(text.toUpperCase())}
-                      autoCapitalize="characters"
-                      maxLength={6}
-                      autoFocus
-                      returnKeyType="done"
-                      onSubmitEditing={() => {
-                        if (inviteCode.length === 6) handleJoinWithCode();
-                      }}
-                    />
-                    <View style={styles.codeActions}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.cancelCodeBtn,
-                          pressed && styles.pressed,
-                        ]}
-                        onPress={() => {
-                          setShowInviteCode(false);
-                          setInviteCode('');
-                          Keyboard.dismiss();
-                        }}
-                      >
-                        <AppText style={styles.cancelCodeText}>
-                          {t('common.cancel')}
-                        </AppText>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.joinBtn,
-                          inviteCode.length < 6 && styles.joinBtnDisabled,
-                          pressed && inviteCode.length === 6 && styles.pressed,
-                        ]}
-                        onPress={handleJoinWithCode}
-                        disabled={inviteCode.length < 6}
-                      >
-                        <AppText style={styles.joinBtnText}>
-                          {t('auth.join')}
-                        </AppText>
-                      </Pressable>
-                    </View>
-                  </View>
-                ) : (
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.button,
-                      styles.inviteButton,
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => setShowInviteCode(true)}
-                  >
-                    <AppText style={styles.inviteButtonText}>
-                      {t('auth.enterInviteCode')}
-                    </AppText>
-                  </Pressable>
-                )}
-
                 <Label style={[styles.sectionLabel, { marginTop: spacing.lg, opacity: 0.6 }]}>
                   Beta 測試帳號
                 </Label>
@@ -828,63 +739,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
-  inviteButton: {
-    backgroundColor: P.primary,
-    ...shadow.glow,
-  },
   inviteButtonText: {
     color: P.bg,
     fontSize: 15,
-    fontWeight: '800',
-  },
-  inviteCodeSection: {
-    width: '100%',
-    gap: spacing.sm,
-  },
-  codeInput: {
-    borderWidth: 1.5,
-    borderColor: P.primary,
-    borderRadius: radius.card,
-    padding: spacing.md,
-    fontSize: 24,
-    fontWeight: '700',
-    textAlign: 'center',
-    letterSpacing: 8,
-    color: P.text,
-    backgroundColor: P.surface,
-  },
-  codeActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  cancelCodeBtn: {
-    flex: 1,
-    paddingVertical: 13,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: P.border,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-  cancelCodeText: {
-    color: P.muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  joinBtn: {
-    flex: 1,
-    paddingVertical: 13,
-    borderRadius: radius.full,
-    backgroundColor: P.primary,
-    alignItems: 'center',
-    ...shadow.glow,
-  },
-  joinBtnDisabled: {
-    opacity: 0.4,
-  },
-  joinBtnText: {
-    color: P.bg,
-    fontSize: 14,
     fontWeight: '800',
   },
   devRow: {
