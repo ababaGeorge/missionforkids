@@ -26,6 +26,9 @@ export default function AcceptInvite() {
         if (!active) return;
         setInvite(inv);
         if (inv?.email) setEmail(inv.email);
+      } catch {
+        // 讀取失敗（權限/網路）→ 當成無效邀請，由 fallback 畫面處理，不外洩 uncaught rejection
+        if (active) setInvite(null);
       } finally {
         if (active) setLoadingInvite(false);
       }
@@ -65,7 +68,16 @@ export default function AcceptInvite() {
     return (
       <View style={styles.center}>
         <Starfield />
-        <BodySm style={{ color: P.muted }}>這個邀請無效或已被使用。</BodySm>
+        <BodySm style={{ color: P.muted, textAlign: 'center', marginBottom: spacing.lg }}>
+          這個邀請無效或已被使用。
+        </BodySm>
+        <Pressable
+          testID="invite-invalid-home"
+          onPress={() => router.replace('/')}
+          style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.7 }]}
+        >
+          <AppText style={styles.primaryBtnText}>回到首頁</AppText>
+        </Pressable>
       </View>
     );
   }
@@ -122,7 +134,7 @@ export default function AcceptInvite() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: P.bg },
   body: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: P.bg },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: P.bg, paddingHorizontal: spacing.lg },
   title: { color: P.text, fontSize: 28, textAlign: 'center' },
   sub: { color: P.muted, textAlign: 'center', marginTop: spacing.xs },
   input: {
@@ -139,6 +151,7 @@ const styles = StyleSheet.create({
     backgroundColor: P.primary,
     borderRadius: radius.full,
     paddingVertical: 14,
+    paddingHorizontal: spacing.xl,
     alignItems: 'center',
     ...shadow.glow,
   },
