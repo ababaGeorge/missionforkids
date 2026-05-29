@@ -1,11 +1,14 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
+import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
+import { isValidPointsValue } from './lib/points';
 
 const db = admin.firestore();
 
 /**
- * 家長直接給點 — Callable Function
- * 確保 pointWallets 的寫入透過 server-side 完成
+ * 家長直接給點 / 扣點 — Callable Function。
+ * 點數透過 server-side 寫入確定性錢包 pointWallets/{familyId}_{childId}。
+ * childId 由 server 從 membership 重新解析，不信任 client。
  */
 export const grantPoints = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -20,63 +23,51 @@ export const grantPoints = onCall(async (request) => {
     reason: string;
   };
 
-  if (!childUserId || !familyId || !amount || amount === 0) {
-    throw new HttpsError('invalid-argument', 'Missing or invalid parameters');
+  if (!childUserId || !familyId) {
+    throw new HttpsError('invalid-argument', 'Missing parameters');
   }
-  // amount > 0 給點、amount < 0 扣點。扣點時餘額不低於 0（transaction 內 clamp）。
+  // amount > 0 給點、amount < 0 扣點。必須是有限整數且不為 0。
+  if (!isValidPointsValue(amount) || amount === 0) {
+    throw new HttpsError('invalid-argument', 'amount 必須是非零的有限整數');
+  }
 
   // 驗證呼叫者是家長
   const parentMemberDoc = await db
     .collection('familyMemberships')
     .doc(`${uid}_${familyId}`)
     .get();
-
   if (!parentMemberDoc.exists || parentMemberDoc.data()?.role !== 'parent') {
     throw new HttpsError('permission-denied', 'Only parents can grant points');
   }
 
-  // 驗證孩子是同一個家庭的成員
-  const childMemberDoc = await db
-    .collection('familyMemberships')
-    .doc(`${childUserId}_${familyId}`)
-    .get();
-
-  if (!childMemberDoc.exists) {
+  // 解析權威 childId（server 端，不信任 client）。child 不屬該家庭 → 拋錯。
+  let childId: string;
+  try {
+    childId = await resolveAuthoritativeChildId(db, familyId, childUserId);
+  } catch (e) {
     throw new HttpsError('not-found', 'Child is not a member of this family');
   }
 
-  // Atomic transaction: 建立或更新 wallet + 建立 transaction
+  // Atomic transaction: 找或建確定性錢包 + 寫 transaction
   await db.runTransaction(async (tx) => {
-    // 必須用 tx.get：grantPoints 寫的是 clamp 後的絕對值（非 increment），
-    // 讀取沒掛在交易上的話，並發呼叫會 lost update。
-    const walletQuery = await tx.get(
-      db
-        .collection('pointWallets')
-        .where('userId', '==', childUserId)
-        .where('familyId', '==', familyId)
-        .limit(1)
-    );
+    // tx.get 在任何 write 之前
+    const wallet = await resolveChildWallet(tx, db, familyId, childId);
 
-    let walletRef: admin.firestore.DocumentReference;
     let delta = amount; // 實際變動量（扣點被 clamp 時會小於 |amount|）
-
-    if (walletQuery.empty) {
-      walletRef = db.collection('pointWallets').doc();
-      // 新 wallet：扣點不可為負，clamp 到 0
-      const initial = Math.max(0, amount);
+    if (!wallet.exists) {
+      const initial = Math.max(0, amount); // 新錢包扣點 clamp 到 0
       delta = initial;
-      tx.set(walletRef, {
+      tx.set(wallet.ref, {
+        childId,
         userId: childUserId,
         familyId,
         balance: initial,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else {
-      walletRef = walletQuery.docs[0].ref;
-      const current = (walletQuery.docs[0].data().balance as number) || 0;
-      const next = Math.max(0, current + amount); // 餘額不低於 0
-      delta = next - current;
-      tx.update(walletRef, {
+      const next = Math.max(0, wallet.balance + amount); // 餘額不低於 0
+      delta = next - wallet.balance;
+      tx.update(wallet.ref, {
         balance: next,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -85,7 +76,8 @@ export const grantPoints = onCall(async (request) => {
     if (delta !== 0) {
       const txRef = db.collection('pointTransactions').doc();
       tx.set(txRef, {
-        walletId: walletRef.id,
+        walletId: wallet.ref.id,
+        childId,
         delta,
         sourceType: 'parent_grant',
         sourceId: null,

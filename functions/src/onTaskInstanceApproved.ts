@@ -1,13 +1,15 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
+import { isValidPointsValue } from './lib/points';
 
 const db = admin.firestore;
 
 /**
- * 當 taskInstance 狀態變為 approved 時，發放點數到孩子的 wallet。
- * 使用 Firestore transaction 保證原子性。
- * Idempotency: 如果 pointsAwarded 已經有值，跳過（防止重複發點）。
+ * taskInstance 變 approved 時，發點到孩子的確定性錢包 {familyId}_{childId}。
+ * childId 由 server 從 membership 重新解析（不信任 doc 上 client 寫的 childId）。
+ * Idempotency: transaction 內重讀 instance 的 pointsAwarded + 確定性 transaction doc id。
  */
 export const onTaskInstanceApproved = onDocumentUpdated(
   'taskInstances/{instanceId}',
@@ -16,16 +18,12 @@ export const onTaskInstanceApproved = onDocumentUpdated(
     const after = event.data?.after.data();
     if (!before || !after) return;
 
-    // 只處理狀態變為 approved 的情況
-    if (before.status === 'approved' || after.status !== 'approved') {
-      return;
-    }
+    // 只處理狀態變為 approved
+    if (before.status === 'approved' || after.status !== 'approved') return;
 
-    // Idempotency: 已經發過點數就跳過
+    // 早退：已發過（事件層級快速判斷；transaction 內會再嚴格重讀）
     if (after.pointsAwarded != null) {
-      logger.info('Points already awarded, skipping', {
-        instanceId: event.data?.after.id,
-      });
+      logger.info('Points already awarded, skipping', { instanceId: event.data?.after.id });
       return;
     }
 
@@ -33,46 +31,57 @@ export const onTaskInstanceApproved = onDocumentUpdated(
     const instanceRef = event.data!.after.ref;
     const { taskId, userId, familyId } = after;
 
-    // 查詢 Task 取得點數
     const taskDoc = await db().collection('tasks').doc(taskId).get();
     if (!taskDoc.exists) {
       logger.error('Task not found', { taskId });
       return;
     }
     const points = taskDoc.data()!.points as number;
+    if (!isValidPointsValue(points)) {
+      logger.error('Task points malformed, skipping', { taskId, points });
+      return;
+    }
+
+    // server 端解析權威 childId（membership 讀取，在 transaction 之前）
+    let childId: string;
+    try {
+      childId = await resolveAuthoritativeChildId(db(), familyId, userId);
+    } catch (e) {
+      logger.error('resolveAuthoritativeChildId failed, skipping', { instanceId, userId, familyId, err: String(e) });
+      return;
+    }
 
     await db().runTransaction(async (tx) => {
-      // 找或建 PointWallet
-      const walletQuery = await tx.get(
-        db()
-          .collection('pointWallets')
-          .where('userId', '==', userId)
-          .where('familyId', '==', familyId)
-          .limit(1)
-      );
+      // --- 所有 read 在任何 write 之前 ---
+      const instanceSnap = await tx.get(instanceRef);
+      if (instanceSnap.data()?.pointsAwarded != null) {
+        // 重放保護：別的觸發已發過
+        return;
+      }
+      const wallet = await resolveChildWallet(tx, db(), familyId, childId);
+      const ptRef = db().collection('pointTransactions').doc(`task_completion_${instanceId}`);
+      const ptSnap = await tx.get(ptRef);
+      if (ptSnap.exists) return; // 確定性 tx id 已存在 → 已發過
 
-      let walletRef: admin.firestore.DocumentReference;
-
-      if (walletQuery.empty) {
-        walletRef = db().collection('pointWallets').doc();
-        tx.set(walletRef, {
+      // --- writes ---
+      if (!wallet.exists) {
+        tx.set(wallet.ref, {
+          childId,
           userId,
           familyId,
           balance: points,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } else {
-        walletRef = walletQuery.docs[0].ref;
-        tx.update(walletRef, {
+        tx.update(wallet.ref, {
           balance: admin.firestore.FieldValue.increment(points),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
 
-      // 寫入 PointTransaction
-      const ptRef = db().collection('pointTransactions').doc();
       tx.set(ptRef, {
-        walletId: walletRef.id,
+        walletId: wallet.ref.id,
+        childId,
         delta: points,
         sourceType: 'task_completion',
         sourceId: instanceId,
@@ -81,12 +90,9 @@ export const onTaskInstanceApproved = onDocumentUpdated(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // 標記 pointsAwarded（idempotency 標記）
-      tx.update(instanceRef, {
-        pointsAwarded: points,
-      });
+      tx.update(instanceRef, { pointsAwarded: points });
     });
 
-    logger.info('Points awarded', { instanceId, userId, points });
+    logger.info('Points awarded', { instanceId, childId, points });
   }
 );
