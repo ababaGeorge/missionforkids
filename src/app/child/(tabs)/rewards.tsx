@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import firestore from '@react-native-firebase/firestore';
 import type { RewardItem, RewardOrder, PointWallet } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
+import { childIdFor, walletDocId } from '../../../lib/childId';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Empty } from '../../../design/Empty';
@@ -67,21 +68,19 @@ export default function ChildRewards() {
     return unsub;
   }, [uid]);
 
+  const childId = childIdFor(user, uid ?? '');
+
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('pointWallets')
-      .where('userId', '==', uid)
-      .where('familyId', '==', familyId)
-      .limit(1)
-      .onSnapshot((snap) => {
-        if (!snap) return;
-        if (!snap.empty) {
-          setWallet({ id: snap.docs[0].id, ...snap.docs[0].data() } as PointWallet);
-        }
+      .doc(walletDocId(familyId, childId))
+      .onSnapshot((doc) => {
+        if (!doc) return;
+        setWallet(doc.exists() ? ({ id: doc.id, ...doc.data() } as PointWallet) : null);
       }, (err) => console.warn('[ChildRewards] wallet error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   useEffect(() => {
     if (!familyId) return;
@@ -100,7 +99,7 @@ export default function ChildRewards() {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('rewardOrders')
-      .where('userId', '==', uid)
+      .where('childId', '==', childId)
       .where('familyId', '==', familyId)
       .limit(20)
       .onSnapshot((snap) => {
@@ -117,7 +116,7 @@ export default function ChildRewards() {
         setOrders(list);
       }, (err) => console.warn('[ChildRewards] orders error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   const balance = wallet?.balance || 0;
 

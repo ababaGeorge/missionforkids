@@ -85,6 +85,7 @@ export type PointTransactionSourceType =
 export interface PointTransaction {
   id: string;
   walletId: string;
+  childId?: string;
   delta: number;
   sourceType: PointTransactionSourceType;
   sourceId: string | null;
@@ -131,6 +132,7 @@ export interface TaskInstance {
   id: string;
   taskId: string;
   userId: string;
+  childId?: string;
   familyId: string;
   periodStart: Timestamp;
   periodEnd: Timestamp;
@@ -191,6 +193,7 @@ export interface RewardOrder {
   familyId: string;
   itemId: string;
   userId: string;
+  childId?: string;
   pointCostSnapshot: number;
   status: RewardOrderStatus;
   cancelledAt: Timestamp | null;
