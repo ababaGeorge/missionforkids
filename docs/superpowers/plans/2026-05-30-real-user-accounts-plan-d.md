@@ -77,9 +77,9 @@
   - ⚠️ 部署時：`firebase deploy --only functions` 會提示刪除 `redeemInvite` CF（預期）；rules deploy 移除 inviteCodes 規則。
 
 ### Section 5：清測試資料 + 整合驗證
-- [ ] 清 dev-family-001 殘留**匿名 Firestore 資料 + 匿名 Firebase Auth users**（codex #12，不只 Firestore；不靠 display-name 啟發式，用明確標記/uid）
-- [ ] 端到端複跑 Section 2 全流程確認沒被破壞
-- [ ] functions + RN 測試雙綠、tsc 乾淨、git 分段 commit
+- [x] `functions/scripts/cleanup-anon-dev-data.ts`（dry-run 預設）：dry-run 確認清單後對 prod 執行 — 刪 **73 匿名 Auth users + 390 dev-family-001 Firestore docs**，保留 3 個 seed password 帳號。明確標記法（authProvider==anonymous / familyId==dev-family-001），不靠 display-name（codex #12）。復跑 dry-run = 0 殘留、seed 錢包 balance 8 完好。
+- [x] 整合驗證（模擬器載入 S3/S4 新碼）：新 sign-in 畫面 dev 填入鈕 ✓、填入「家長」→ 登入 ✓、家長首頁 12 任務 ✓、家庭頁**無邀請碼區** ✓、FAB→email 邀請 modal ✓、child 端 ★8 渲染 ✓。
+- [x] functions 51/51 + RN 13/13 + root/functions tsc 乾淨、git 分 5 段 commit。**Section 5 完成**。
 
 ---
 
@@ -93,12 +93,17 @@
 
 ---
 
-## 完成定義（DoD）
-- dev 測試靠固定真帳號（穩定 uid，非匿名）；seed 跑通完整流程。
-- 匿名 dev 捷徑、整套邀請碼機制、family 匿名加小孩 全部移除；App 只剩 email 邀請一套加成員。
-- seed shape 對齊真實流程（測試保證不漂移）；小孩 seed 內容帶 childId。
-- 真實功能不受影響、測試雙綠、tsc 乾淨；dev-family-001 殘留匿名資料 + Auth users 清掉。
+## 完成定義（DoD）— ✅ 全數達成（2026-06-02）
+- [x] dev 測試靠固定真帳號（穩定 uid，非匿名）；seed 跑通完整流程（登入+渲染證明）。
+- [x] 匿名 dev 捷徑、整套邀請碼機制、family 匿名加小孩 全部移除；App 只剩 email 邀請一套加成員。
+- [x] seed shape 對齊真實流程（shape 斷言測試保證不漂移）；小孩 seed 內容帶 childId。
+- [x] 真實功能不受影響、測試雙綠（functions 51/51、RN 13/13）、tsc 乾淨；dev-family-001 殘留匿名資料 + Auth users 清掉（0 殘留）。
 - 未來項：co-parent 用 email 邀請補。
+
+## ⚠️ 尚未做的部署（Plan D 程式碼已完成、未上線）
+- `firebase deploy --only functions`：會提示**刪除 redeemInvite CF**（預期）。
+- `firebase deploy --only firestore:rules`：移除 inviteCodes 規則。
+- 之後：feat/real-user-accounts → main 開 PR（A/B/C/D 收齊）。
 
 ## 未來（不在 Plan D）
 - email 邀請擴充支援邀請另一位家長（補回 co-parent）。
