@@ -186,20 +186,6 @@ async function seed() {
         }));
     }
 
-    // one delivered reward order (history); childId so child rewards "history" tab shows it
-    kb.set(db.collection('rewardOrders').doc(`dev-order-ice-${k.uid}`), {
-      familyId: FAMILY_ID,
-      userId: k.uid,
-      childId: k.uid,
-      itemId: 'dev-reward-ice',
-      pointCostSnapshot: 50,
-      status: 'delivered',
-      cancelledAt: null,
-      approvedAt: Timestamp.fromDate(new Date(Date.now() - 24 * 3600 * 1000)),
-      deliveredAt: Timestamp.now(),
-      createdAt: now,
-    });
-
     await kb.commit();
     console.log(`  ✓ ${k.uid} seeded (wallet balance=${approvedPoints})`);
   }
