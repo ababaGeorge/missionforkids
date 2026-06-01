@@ -100,10 +100,12 @@
 - [x] 真實功能不受影響、測試雙綠（functions 51/51、RN 13/13）、tsc 乾淨；dev-family-001 殘留匿名資料 + Auth users 清掉（0 殘留）。
 - 未來項：co-parent 用 email 邀請補。
 
-## ⚠️ 尚未做的部署（Plan D 程式碼已完成、未上線）
-- `firebase deploy --only functions`：會提示**刪除 redeemInvite CF**（預期）。
-- `firebase deploy --only firestore:rules`：移除 inviteCodes 規則。
-- 之後：feat/real-user-accounts → main 開 PR（A/B/C/D 收齊）。
+## 部署狀態（2026-06-02 ✅ 已上線）
+- [x] **push** feat/real-user-accounts → origin（同步）。
+- [x] **PR #5** feat → main（OPEN）：https://github.com/ababaGeorge/missionforkids/pull/5
+- [x] **functions 部署**：prod 9 個 function，刪除 `redeemInvite`（Plan D 移除）+ `bootstrapDevSession`（早期孤兒）；順帶新建 `bootstrapParentAccount`（之前竟未部署到 prod）。MCP list 驗證。
+- [x] **firestore:rules 部署**：inviteCodes 規則移除，live rules 驗證確認。
+- ⬜ PR #5 尚未 merge（待使用者決定）。
 
 ## 未來（不在 Plan D）
 - email 邀請擴充支援邀請另一位家長（補回 co-parent）。
