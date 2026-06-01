@@ -18,7 +18,6 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import type { Family, FamilyMembership, User } from '../../../types/models';
-import { createInviteCode, createParentInviteCode } from '../../../lib/inviteCode';
 import { createFamilyInvite } from '../../../lib/familyInvite';
 import { resolveMemberUser } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
@@ -32,7 +31,6 @@ import {
   BodySm,
   Label,
   Muted,
-  Data,
 } from '../../../design/Text';
 
 type MemberRow = { membership: FamilyMembership; user: User };
@@ -48,28 +46,14 @@ const AVATAR_EMOJIS = [
   '🐵', '🐸', '🐧', '🦄', '🌟', '⚽', '🎨', '🚀',
 ];
 
-type InviteRow = {
-  code: string;
-  childUserId: string | null;
-  childName: string;
-  role: 'parent' | 'child';
-  used: boolean;
-  expired: boolean;
-  expiresAt: Date;
-};
-
 export default function FamilyScreen() {
   const router = useRouter();
   const uid = auth().currentUser?.uid;
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [invites, setInvites] = useState<InviteRow[]>([]);
 
   const [showCreateFamily, setShowCreateFamily] = useState(false);
   const [familyName, setFamilyName] = useState('');
-  const [showAddChild, setShowAddChild] = useState(false);
-  const [childName, setChildName] = useState('');
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [showInviteEmail, setShowInviteEmail] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
@@ -120,46 +104,6 @@ export default function FamilyScreen() {
     return unsub;
   }, [family?.id]);
 
-  useEffect(() => {
-    if (!family) return;
-    const unsub = firestore()
-      .collection('inviteCodes')
-      .where('familyId', '==', family.id)
-      .onSnapshot(async (snap) => {
-        if (!snap) return;
-        const rows: InviteRow[] = [];
-        for (const d of snap.docs) {
-          const data = d.data();
-          const expiresAt = data.expiresAt.toDate();
-          const role = data.role || 'child';
-          let cn = '';
-          if (role === 'parent') cn = '家長';
-          else if (data.childUserId) {
-            try {
-              const cd = await firestore().collection('users').doc(data.childUserId).get();
-              cn = cd.data()?.displayName || '';
-            } catch {}
-          }
-          rows.push({
-            code: d.id,
-            childUserId: data.childUserId || null,
-            childName: cn,
-            role,
-            used: data.used,
-            expired: expiresAt < new Date(),
-            expiresAt,
-          });
-        }
-        rows.sort((a, b) => {
-          if (!a.used && !a.expired && (b.used || b.expired)) return -1;
-          if ((a.used || a.expired) && !b.used && !b.expired) return 1;
-          return b.expiresAt.getTime() - a.expiresAt.getTime();
-        });
-        setInvites(rows);
-      });
-    return unsub;
-  }, [family?.id]);
-
   const handleCreateFamily = async () => {
     if (!uid || !familyName.trim()) return;
     const ref = await firestore().collection('families').add({
@@ -183,38 +127,6 @@ export default function FamilyScreen() {
     setShowCreateFamily(false);
   };
 
-  const handleAddChild = async () => {
-    if (!uid || !family || !childName.trim()) return;
-    try {
-      const childRef = await firestore().collection('users').add({
-        displayName: childName.trim(),
-        avatarUrl: null,
-        authProvider: 'anonymous',
-        authProviderId: '',
-        roleType: 'child',
-        email: null,
-        birthday: null,
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      });
-      await firestore()
-        .collection('familyMemberships')
-        .doc(`${childRef.id}_${family.id}`)
-        .set({
-          familyId: family.id,
-          userId: childRef.id,
-          role: 'child',
-          status: 'active',
-          invitedBy: uid,
-          joinedAt: firestore.FieldValue.serverTimestamp(),
-        });
-      const code = await createInviteCode(childRef.id, family.id);
-      setGeneratedCode(code);
-      setChildName('');
-    } catch (e: any) {
-      Alert.alert('錯誤', e.message || '加入失敗');
-    }
-  };
-
   const handleInviteByEmail = async () => {
     if (!family || !inviteEmail.trim() || !inviteName.trim()) return;
     try {
@@ -236,47 +148,6 @@ export default function FamilyScreen() {
     } finally {
       setInviting(false);
     }
-  };
-
-  const handleInviteParent = async () => {
-    if (!uid || !family) return;
-    try {
-      const code = await createParentInviteCode(family.id, uid);
-      setGeneratedCode(code);
-      setShowAddChild(true);
-    } catch (e: any) {
-      Alert.alert('錯誤', e.message || '產生邀請碼失敗');
-    }
-  };
-
-  const handleRegenerate = async (childId: string) => {
-    if (!family) return;
-    try {
-      const code = await createInviteCode(childId, family.id);
-      Alert.alert('邀請碼', code);
-    } catch (e: any) {
-      Alert.alert('錯誤', e.message || '失敗');
-    }
-  };
-
-  const handleDeleteInvite = (code: string) => {
-    Alert.alert('刪除邀請碼', `確定要刪除 ${code}？`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '刪除',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await firestore()
-              .collection('inviteCodes')
-              .doc(code)
-              .update({ used: true });
-          } catch (e: any) {
-            Alert.alert('錯誤', e.message || '失敗');
-          }
-        },
-      },
-    ]);
   };
 
   const handleGrant = async () => {
@@ -456,77 +327,6 @@ export default function FamilyScreen() {
           )}
         </View>
 
-        {invites.filter((c) => !c.used).length > 0 && (
-          <View style={styles.section}>
-            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
-              邀請碼
-            </Label>
-            {invites.filter((c) => !c.used).map((code) => {
-              const statusColor = code.used
-                ? P.muted
-                : code.expired
-                ? P.accentHot
-                : P.green;
-              const statusLabel = code.used
-                ? '已使用'
-                : code.expired
-                ? '已過期'
-                : '有效';
-              return (
-                <View key={code.code} style={styles.codeRow}>
-                  <View style={{ flex: 1 }}>
-                    <Data
-                      style={{
-                        fontSize: 16,
-                        fontWeight: '700',
-                        letterSpacing: 2,
-                      }}
-                    >
-                      {code.code}
-                    </Data>
-                    <Muted style={{ fontSize: 11, marginTop: 2 }}>
-                      {code.childName}
-                    </Muted>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: `${statusColor}22` },
-                      ]}
-                    >
-                      <Label
-                        style={{ color: statusColor, fontSize: 11 }}
-                      >
-                        {statusLabel}
-                      </Label>
-                    </View>
-                    {code.expired && code.role === 'child' && code.childUserId && (
-                      <Pressable
-                        onPress={() => handleRegenerate(code.childUserId!)}
-                        style={{ marginTop: 4 }}
-                      >
-                        <Label style={{ color: P.primary, fontSize: 11 }}>
-                          重新產生
-                        </Label>
-                      </Pressable>
-                    )}
-                    <Pressable
-                      onPress={() => handleDeleteInvite(code.code)}
-                      style={{ marginTop: 4 }}
-                      hitSlop={6}
-                    >
-                      <Label style={{ color: P.accentHot, fontSize: 11 }}>
-                        刪除
-                      </Label>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
         <View style={styles.section}>
           <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
             一般
@@ -572,14 +372,7 @@ export default function FamilyScreen() {
       </ScrollView>
 
       <Pressable
-        onPress={() => {
-          Alert.alert('邀請成員', '', [
-            { text: '加入小孩', onPress: () => setShowAddChild(true) },
-            { text: '用 Email 邀請小孩', onPress: () => setShowInviteEmail(true) },
-            { text: '邀請家長', onPress: handleInviteParent },
-            { text: '取消', style: 'cancel' },
-          ]);
-        }}
+        onPress={() => setShowInviteEmail(true)}
         style={styles.fab}
         hitSlop={10}
       >
@@ -587,79 +380,6 @@ export default function FamilyScreen() {
       </Pressable>
 
       {renderCreateFamilyModal()}
-
-      {/* Add child / invite parent modal */}
-      <Modal visible={showAddChild} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={modalStyles.overlay}>
-              <View style={modalStyles.sheet}>
-                {generatedCode ? (
-                  <>
-                    <H3 style={{ marginBottom: spacing.md, textAlign: 'center' }}>
-                      邀請碼
-                    </H3>
-                    <Display
-                      style={{
-                        color: P.primary,
-                        textAlign: 'center',
-                        letterSpacing: 8,
-                        marginVertical: spacing.lg,
-                      }}
-                    >
-                      {generatedCode}
-                    </Display>
-                    <Muted style={{ textAlign: 'center', marginBottom: spacing.lg }}>
-                      在對方裝置輸入此邀請碼（24 小時內有效）
-                    </Muted>
-                    <Pressable
-                      onPress={() => {
-                        setGeneratedCode(null);
-                        setShowAddChild(false);
-                      }}
-                      style={modalStyles.fullBtn}
-                    >
-                      <Label style={{ color: P.bg, fontSize: 15, fontWeight: '800' }}>
-                        完成
-                      </Label>
-                    </Pressable>
-                  </>
-                ) : (
-                  <>
-                    <H3 style={{ marginBottom: spacing.md }}>加入小孩</H3>
-                    <TextInput
-                      style={modalStyles.input}
-                      placeholder="小孩名字"
-                      placeholderTextColor={P.muted}
-                      value={childName}
-                      onChangeText={setChildName}
-                      returnKeyType="done"
-                      onSubmitEditing={handleAddChild}
-                    />
-                    <View style={modalStyles.actions}>
-                      <Pressable
-                        onPress={() => setShowAddChild(false)}
-                        style={modalStyles.cancel}
-                      >
-                        <Label style={{ color: P.muted }}>取消</Label>
-                      </Pressable>
-                      <Pressable
-                        onPress={handleAddChild}
-                        style={modalStyles.save}
-                      >
-                        <Label style={{ color: P.bg }}>建立</Label>
-                      </Pressable>
-                    </View>
-                  </>
-                )}
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </KeyboardAvoidingView>
-      </Modal>
 
       {/* Invite child by email */}
       <Modal visible={showInviteEmail} animationType="slide" transparent>
@@ -986,21 +706,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: P.border,
   },
-  codeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    backgroundColor: P.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: P.border,
-    marginBottom: 6,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.full,
-  },
   settingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1089,14 +794,6 @@ const modalStyles = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: P.primary,
     alignItems: 'center',
-  },
-  fullBtn: {
-    paddingVertical: 16,
-    borderRadius: radius.full,
-    backgroundColor: P.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.sm,
   },
   modeRow: {
     flexDirection: 'row',

@@ -23,27 +23,15 @@
     "signOut": "Sign Out",
     "welcome": "Welcome to Mission for Kids",
     "parentSignIn": "Parent Sign In",
-    "childJoin": "Child Join",
-    "enterInviteCode": "Enter Invite Code",
     "join": "Join"
   },
   "family": {
     "createFamily": "Create Family",
     "familyName": "Family Name",
     "inviteMember": "Invite Member",
-    "addChild": "Add Child",
     "members": "Family Members",
     "childName": "Child's Name",
-    "birthday": "Birthday",
-    "inviteCode": "Invite Code",
-    "inviteCodeHint": "Enter this code on child's device (valid for 24 hours)",
-    "inviteCodes": "Invite Codes",
-    "codeUsed": "Used",
-    "codeExpired": "Expired",
-    "codeActive": "Active",
-    "regenerateCode": "Regenerate Code",
-    "inviteParent": "Invite Parent",
-    "noInviteCodes": "No invite codes yet"
+    "birthday": "Birthday"
   },
   "tasks": {
     "title": "Tasks",
