@@ -107,3 +107,18 @@
 
 ## 未來（不在 Plan D）
 - email 邀請擴充支援邀請另一位家長（補回 co-parent）。
+
+## Codex 審查發現（2026-06-02，3×P2，使用者決定「先記下來」待處理）
+- **#2 seed 兌換訂單被退**（✅ 已修 commit）：seeded delivered order cost 50 > 錢包 8 → `onRewardOrderCreated` 退成 rejected。已移除 seed 該訂單。⚠️ **prod 殘留 2 個 rejected doc**（`rewardOrders/dev-order-ice-dev-kid1`、`-dev-kid2`）尚未刪（使用者只授權 review，未授權動 prod）。
+- **#1 email 寄送失敗無補救**（待處理）：`createFamilyInvite` 回 `emailSent:false` 時，family.tsx 丟掉 `inviteId` 只叫家長重試；邀請碼 fallback 已移除 → Resend 故障時家長卡死。正解=email 重寄/顯示連結，屬「email 邀請擴充」未來項。
+- **#3 cleanup 全域刪匿名 Auth**（待處理）：`cleanup-anon-dev-data.ts` `--execute` 刪所有 providerData 空的 Auth user，未 scope 到 dev-family-001。本次安全（已驗 73 匿名全是 dev），但作為可重用工具過廣，未來重用前應加 dev-family scope 防呆。
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | PASS (gate) | 3 findings (3×P2), 1 fixed |
+
+- **CODEX:** 3 advisory findings (no P1). #2 (seed 訂單被退) 已修並 commit；#1 (email 失敗無補救) + #3 (cleanup scope 過廣) 由使用者決定先記錄待處理。
+- **UNRESOLVED:** 2 — #1 email 重寄補救（屬 email 邀請擴充未來項）、#3 cleanup scope 防呆（重用前再加）。另 prod 殘留 2 個 rejected 訂單 doc 待清。
+- **VERDICT:** Plan D 程式碼 CLEARED（gate pass，無阻擋性問題）。可進部署/PR；上述 P2 為非阻擋待辦。
