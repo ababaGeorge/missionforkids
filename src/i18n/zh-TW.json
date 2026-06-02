@@ -23,27 +23,15 @@
     "signOut": "登出",
     "welcome": "歡迎來到任務獎勵",
     "parentSignIn": "家長登入",
-    "childJoin": "孩子加入",
-    "enterInviteCode": "輸入邀請碼",
     "join": "加入"
   },
   "family": {
     "createFamily": "建立家庭",
     "familyName": "家庭名稱",
     "inviteMember": "邀請成員",
-    "addChild": "新增孩子",
     "members": "家庭成員",
     "childName": "孩子名稱",
-    "birthday": "生日",
-    "inviteCode": "邀請碼",
-    "inviteCodeHint": "請在孩子的裝置上輸入此邀請碼（24 小時內有效）",
-    "inviteCodes": "邀請碼管理",
-    "codeUsed": "已使用",
-    "codeExpired": "已過期",
-    "codeActive": "有效",
-    "regenerateCode": "重新產生",
-    "inviteParent": "邀請家長",
-    "noInviteCodes": "還沒有邀請碼"
+    "birthday": "生日"
   },
   "tasks": {
     "title": "任務",

@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { TaskInstance } from '../../../types/models';
+import { resolveMyChildId } from '../../../lib/childId';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Display, H3, Label, Muted, Data } from '../../../design/Text';
@@ -37,9 +38,15 @@ const fmtTime = (ts: any): string => {
 export default function ChildNotif() {
   const uid = auth().currentUser?.uid;
   const [familyId, setFamilyId] = useState<string | null>(null);
+  const [childId, setChildId] = useState<string | null>(null);
   const [notifs, setNotifs] = useState<NotifItem[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const snapshotGen = useRef(0);
+
+  useEffect(() => {
+    if (!uid) return;
+    resolveMyChildId(uid).then(setChildId).catch(() => setChildId(uid));
+  }, [uid]);
 
   useEffect(() => {
     if (!uid) return;
@@ -56,10 +63,10 @@ export default function ChildNotif() {
   }, [uid]);
 
   useEffect(() => {
-    if (!uid || !familyId) return;
+    if (!childId || !familyId) return;
     const unsub = firestore()
       .collection('taskInstances')
-      .where('userId', '==', uid)
+      .where('childId', '==', childId)
       .where('familyId', '==', familyId)
       .where('status', 'in', ['approved', 'rejected'])
       .limit(20)
@@ -92,7 +99,7 @@ export default function ChildNotif() {
         setNotifs(items);
       }, (err) => console.error('[Notif] snapshot error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [childId, familyId]);
 
   const unreadCount = notifs.filter((n) => !readIds.has(n.id)).length;
 

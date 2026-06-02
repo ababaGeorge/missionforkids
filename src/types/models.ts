@@ -8,11 +8,14 @@ export interface User {
   id: string;
   displayName: string;
   avatarUrl: string | null;
-  authProvider: 'apple' | 'google' | 'anonymous';
+  authProvider: 'apple' | 'google' | 'password' | 'anonymous';
   authProviderId: string;
   roleType: 'parent' | 'child';
+  email: string | null;
   birthday: Timestamp | null;
   createdAt: Timestamp;
+  // 小孩專用：點數釘 childId（值預設 = 當下 uid）。家長為 undefined。
+  childId?: string;
 }
 
 export interface Family {
@@ -36,6 +39,28 @@ export interface FamilyMembership {
   // family-scoped 覆寫：與真實 user.displayName / avatar 無關，僅此家庭內顯示用
   nickname?: string | null;
   avatarEmoji?: string | null;
+  childId?: string | null;
+}
+
+export type FamilyInviteStatus = 'pending' | 'accepted' | 'expired';
+
+export interface FamilyInviteChildProfile {
+  displayName: string;
+  nickname: string | null;
+  avatarEmoji: string | null;
+}
+
+export interface FamilyInvite {
+  id: string;
+  email: string;
+  familyId: string;
+  role: 'child';
+  invitedBy: string;
+  status: FamilyInviteStatus;
+  childProfile: FamilyInviteChildProfile;
+  acceptedBy: string | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
 }
 
 // ============================================
@@ -45,6 +70,7 @@ export interface FamilyMembership {
 export interface PointWallet {
   id: string;
   userId: string;
+  childId?: string;
   familyId: string;
   balance: number;
   updatedAt: Timestamp;
@@ -59,6 +85,7 @@ export type PointTransactionSourceType =
 export interface PointTransaction {
   id: string;
   walletId: string;
+  childId?: string;
   delta: number;
   sourceType: PointTransactionSourceType;
   sourceId: string | null;
@@ -105,6 +132,7 @@ export interface TaskInstance {
   id: string;
   taskId: string;
   userId: string;
+  childId?: string;
   familyId: string;
   periodStart: Timestamp;
   periodEnd: Timestamp;
@@ -165,6 +193,7 @@ export interface RewardOrder {
   familyId: string;
   itemId: string;
   userId: string;
+  childId?: string;
   pointCostSnapshot: number;
   status: RewardOrderStatus;
   cancelledAt: Timestamp | null;

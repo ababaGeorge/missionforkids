@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import firestore from '@react-native-firebase/firestore';
 import type { RewardItem, PointWallet } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
+import { childIdFor, walletDocId } from '../../../lib/childId';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -67,21 +68,19 @@ export default function RewardConfirm() {
       });
   }, [rewardId]);
 
+  const childId = childIdFor(user, uid ?? '');
+
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('pointWallets')
-      .where('userId', '==', uid)
-      .where('familyId', '==', familyId)
-      .limit(1)
-      .onSnapshot((snap) => {
-        if (!snap) return;
-        if (!snap.empty) {
-          setWallet({ id: snap.docs[0].id, ...snap.docs[0].data() } as PointWallet);
-        }
+      .doc(walletDocId(familyId, childId))
+      .onSnapshot((doc) => {
+        if (!doc) return;
+        setWallet(doc.exists() ? ({ id: doc.id, ...doc.data() } as PointWallet) : null);
       }, (err) => console.error('[RewardDetail] wallet error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   const onClose = () => {
     if (router.canGoBack()) router.back();
@@ -101,6 +100,7 @@ export default function RewardConfirm() {
         familyId,
         itemId: item.id,
         userId: uid,
+        childId: childIdFor(user, uid),
         pointCostSnapshot: item.pointCost,
         status: 'pending',
         cancelledAt: null,

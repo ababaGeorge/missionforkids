@@ -6,6 +6,7 @@ import firestore from '@react-native-firebase/firestore';
 import { useRouter } from 'expo-router';
 import type { PointWallet, TaskInstance } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
+import { childIdFor, walletDocId } from '../../../lib/childId';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Display, Body, Label, Muted, Data } from '../../../design/Text';
@@ -41,34 +42,32 @@ export default function ChildMe() {
     return unsub;
   }, [uid]);
 
+  const childId = childIdFor(user, uid ?? '');
+
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('pointWallets')
-      .where('userId', '==', uid)
-      .where('familyId', '==', familyId)
-      .limit(1)
-      .onSnapshot((snap) => {
-        if (!snap) return;
-        if (!snap.empty) {
-          setWallet({ id: snap.docs[0].id, ...snap.docs[0].data() } as PointWallet);
-        }
+      .doc(walletDocId(familyId, childId))
+      .onSnapshot((doc) => {
+        if (!doc) return;
+        setWallet(doc.exists() ? ({ id: doc.id, ...doc.data() } as PointWallet) : null);
       }, (err) => console.error('[Me] wallet error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('taskInstances')
-      .where('userId', '==', uid)
+      .where('childId', '==', childId)
       .where('familyId', '==', familyId)
       .onSnapshot((snap) => {
         if (!snap) return;
         setInstances(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TaskInstance)));
       }, (err) => console.error('[Me] instances error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   const stars = wallet?.balance || 0;
   const streak = 0;

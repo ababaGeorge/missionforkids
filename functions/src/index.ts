@@ -8,4 +8,6 @@ export { onRewardOrderCancelledOrRejected } from './onRewardOrderCancelledOrReje
 export { autoCompleteDeliveredOrders } from './autoCompleteDeliveredOrders';
 export { analyzePhoto } from './analyzePhoto';
 export { grantPoints } from './grantPoints';
-export { redeemInvite } from './redeemInvite';
+export { bootstrapParentAccount } from './bootstrapParentAccount';
+export { createFamilyInvite } from './createFamilyInvite';
+export { acceptFamilyInvite } from './acceptFamilyInvite';

@@ -47,11 +47,13 @@ service cloud.firestore {
         isFamilyMember(resource.data.familyId);
     }
 
-    // ========== Invite Codes ==========
-    match /inviteCodes/{codeId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+    // ========== Family Invites（email 邀請）==========
+    // inviteId 為隨機不可猜 doc id（= 邀請連結秘密）。允許單 doc get（接受畫面 pre-auth 顯示），
+    // 禁 list；寫入只走 Cloud Functions (admin)。
+    match /familyInvites/{inviteId} {
+      allow get: if true;
+      allow list: if false;
+      allow write: if false;
     }
 
     // ========== Tasks ==========

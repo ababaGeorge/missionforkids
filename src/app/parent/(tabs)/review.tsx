@@ -552,9 +552,10 @@ function RedeemConfirmSheet({
       return;
     }
     if (!familyId) return;
+    const childId = (order.order as any).childId ?? order.order.userId;
     firestore()
       .collection('pointWallets')
-      .doc(`${familyId}_${order.order.userId}`)
+      .doc(`${familyId}_${childId}`)
       .get()
       .then((d) => setBalance(d.data()?.balance ?? null))
       .catch(() => setBalance(null));

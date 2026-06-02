@@ -12,6 +12,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { TaskInstance, Task, PointWallet } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
+import { childIdFor, walletDocId } from '../../../lib/childId';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Empty } from '../../../design/Empty';
@@ -82,29 +83,27 @@ export default function ChildTasks() {
     return unsub;
   }, [uid]);
 
+  const childId = childIdFor(user, uid ?? '');
+
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('pointWallets')
-      .where('userId', '==', uid)
-      .where('familyId', '==', familyId)
-      .limit(1)
-      .onSnapshot((snap) => {
-        if (!snap) return;
+      .doc(walletDocId(familyId, childId))
+      .onSnapshot((doc) => {
+        if (!doc) return;
         setWallet(
-          snap.empty
-            ? null
-            : ({ id: snap.docs[0].id, ...snap.docs[0].data() } as PointWallet)
+          doc.exists() ? ({ id: doc.id, ...doc.data() } as PointWallet) : null
         );
       }, (err) => console.error('[ChildTasks] wallet error:', (err as any)?.code));
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
       .collection('taskInstances')
-      .where('userId', '==', uid)
+      .where('childId', '==', childId)
       .where('familyId', '==', familyId)
       .where('status', 'in', ['pending', 'submitted', 'approved', 'rejected'])
       .onSnapshot(async (snap) => {
@@ -142,7 +141,7 @@ export default function ChildTasks() {
         console.error('[ChildTasks] snapshot error:', (err as any)?.code, err?.message);
       });
     return unsub;
-  }, [uid, familyId]);
+  }, [uid, familyId, childId]);
 
   const grouped = useMemo(() => {
     const daily: TaskWithInstance[] = [];

@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { Task, TaskInstance } from '../../../types/models';
+import { resolveMyChildId, walletDocId } from '../../../lib/childId';
 import { pickPhoto, uploadPhoto } from '../../../lib/photoUpload';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
@@ -733,17 +734,21 @@ function Celebrate({
 
   useEffect(() => {
     if (!uid || !task.familyId) return;
-    const unsub = firestore()
-      .collection('pointWallets')
-      .where('userId', '==', uid)
-      .where('familyId', '==', task.familyId)
-      .limit(1)
-      .onSnapshot((snap) => {
-        if (snap && !snap.empty) {
-          setWalletBalance(snap.docs[0].data().balance || 0);
-        }
-      });
-    return unsub;
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    resolveMyChildId(uid).then((childId) => {
+      if (cancelled) return;
+      unsub = firestore()
+        .collection('pointWallets')
+        .doc(walletDocId(task.familyId, childId))
+        .onSnapshot((doc) => {
+          if (doc && doc.exists()) setWalletBalance(doc.data()?.balance || 0);
+        });
+    });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
   }, [uid, task.familyId]);
 
   const goRewards = () => {

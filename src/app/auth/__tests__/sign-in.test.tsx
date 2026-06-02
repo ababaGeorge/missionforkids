@@ -1,0 +1,50 @@
+import React from 'react';
+import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import auth from '@react-native-firebase/auth';
+
+jest.mock('expo-router', () => ({ useRouter: () => ({ replace: jest.fn() }) }));
+jest.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
+
+// firestore 沒有全域 mock，但 sign-in.tsx 在 module 頂層 import 它（native module 在
+// 測試環境不存在會直接 throw）。本測試只驗 email/密碼 流程，不碰 firestore，給個空 stub 即可。
+jest.mock('@react-native-firebase/firestore', () => {
+  const firestoreMock: any = () => ({});
+  firestoreMock.Timestamp = { now: jest.fn(), fromDate: jest.fn() };
+  firestoreMock.FieldValue = { serverTimestamp: jest.fn() };
+  return { __esModule: true, default: firestoreMock };
+});
+jest.mock('../../../design/Starfield', () => ({ Starfield: () => null }));
+// design/Text 透過 fonts.ts 載入 @expo-google-fonts/*（未轉譯的 ESM，jest 會炸）。
+// 用簡單的 Text 元件取代，行為對本測試足夠（只需渲染出文字節點）。
+jest.mock('../../../design/Text', () => {
+  const { Text } = require('react-native');
+  const Comp = ({ children, ...props }: any) => <Text {...props}>{children}</Text>;
+  return { AppText: Comp, Display: Comp, BodySm: Comp, Label: Comp };
+});
+
+import SignIn from '../sign-in';
+
+describe('SignIn email/密碼', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('登入模式：填 email/密碼送出會呼叫 signInWithEmailAndPassword', async () => {
+    const signIn = (auth as any).__mocks.signInWithEmailAndPassword;
+    signIn.mockResolvedValue({ user: { uid: 'u1' } });
+
+    const { getByTestId } = render(<SignIn />);
+    fireEvent.changeText(getByTestId('email-input'), 'mom@example.com');
+    fireEvent.changeText(getByTestId('password-input'), 'secret123');
+    fireEvent.press(getByTestId('email-submit'));
+
+    await waitFor(() =>
+      expect(signIn).toHaveBeenCalledWith('mom@example.com', 'secret123')
+    );
+  });
+
+  it('可切換到註冊模式並顯示家庭名稱欄位', () => {
+    const { getByTestId, queryByTestId } = render(<SignIn />);
+    expect(queryByTestId('familyname-input')).toBeNull();
+    fireEvent.press(getByTestId('toggle-auth-mode'));
+    expect(getByTestId('familyname-input')).toBeTruthy();
+  });
+});

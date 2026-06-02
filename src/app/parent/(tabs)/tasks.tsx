@@ -89,7 +89,7 @@ export default function ParentTasks() {
   const [tab, setTab] = useState<'manage' | 'history'>('manage');
   const [tasks, setTasks] = useState<TaskWithInstances[]>([]);
   const [familyId, setFamilyId] = useState<string | null>(null);
-  const [children, setChildren] = useState<{ id: string; name: string }[]>([]);
+  const [children, setChildren] = useState<{ id: string; name: string; childId: string }[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskWithInstances | null>(null);
   const [filterChild, setFilterChild] = useState<string | null>(null);
@@ -155,6 +155,7 @@ export default function ParentTasks() {
             return {
               id: userId,
               name: memberName(membership as any, userDoc.data() as any, '小朋友'),
+              childId: membership.childId ?? userId,
             };
           })
         );
@@ -485,9 +486,12 @@ function CreateTaskModal({
   onClose: () => void;
   familyId: string | null;
   uid: string | undefined;
-  children: { id: string; name: string }[];
+  children: { id: string; name: string; childId: string }[];
   editing?: TaskWithInstances | null;
 }) {
+  // assignee userId → 永久 childId（點數釘 childId）；找不到退回 userId
+  const childIdOf = (assigneeUserId: string) =>
+    children.find((c) => c.id === assigneeUserId)?.childId ?? assigneeUserId;
   const [form, setForm] = useState({
     title: '',
     points: '10',
@@ -652,6 +656,7 @@ function CreateTaskModal({
             await firestore().collection('taskInstances').add({
               taskId: editing.task.id,
               userId: childId,
+              childId: childIdOf(childId),
               familyId,
               periodStart: now,
               periodEnd: dueDate,
@@ -696,6 +701,7 @@ function CreateTaskModal({
         await firestore().collection('taskInstances').add({
           taskId: taskRef.id,
           userId: childId,
+          childId: childIdOf(childId),
           familyId,
           periodStart: now,
           periodEnd: dueDate,
