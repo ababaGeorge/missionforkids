@@ -135,6 +135,11 @@ export default function ParentRewards() {
           list.push({ order, itemTitle, childName });
         }
         setOrders(list);
+      }, (err) => {
+        // A8：缺索引/權限錯誤不再被吞掉。沒有這個 callback 時 FAILED_PRECONDITION
+        // 會讓訂單列表永遠空白且 console 無痕跡。
+        console.error('[rewards] 訂單列表載入失敗:', (err as any)?.code || err);
+        setOrders([]);
       });
     return unsub;
   }, [familyId]);

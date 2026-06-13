@@ -19,12 +19,28 @@ export const onRewardOrderCreated = onDocumentCreated(
     if (!snap) return;
 
     const order = snap.data();
-    const { userId, familyId, pointCostSnapshot } = order;
+    const { userId, familyId, itemId } = order;
     const orderId = snap.id;
 
-    if (!isValidPointsValue(pointCostSnapshot) || pointCostSnapshot <= 0) {
+    // A2 修復：扣點金額只信任 rewardItems 的權威售價，不信任 client 寫的 pointCostSnapshot。
+    // 同時驗證品項屬於同家庭且為 active，擋掉「1 點換貴重獎勵」與跨家庭/已封存品項兌換。
+    let authoritativeCost: number;
+    try {
+      const itemSnap = await db().collection('rewardItems').doc(String(itemId)).get();
+      if (!itemSnap.exists) throw new Error('reward item not found');
+      const item = itemSnap.data()!;
+      if (item.familyId !== familyId) throw new Error('reward item family mismatch');
+      if (item.status !== 'active') throw new Error('reward item not active');
+      authoritativeCost = item.pointCost;
+    } catch (e) {
       await snap.ref.update({ status: 'rejected' });
-      logger.warn('pointCostSnapshot malformed, rejecting order', { orderId, pointCostSnapshot });
+      logger.warn('reward item invalid, rejecting order', { orderId, itemId, err: String(e) });
+      return;
+    }
+
+    if (!isValidPointsValue(authoritativeCost) || authoritativeCost <= 0) {
+      await snap.ref.update({ status: 'rejected' });
+      logger.warn('authoritative cost malformed, rejecting order', { orderId, authoritativeCost });
       return;
     }
 
@@ -51,20 +67,22 @@ export const onRewardOrderCreated = onDocumentCreated(
         logger.warn('No wallet found, rejecting order', { orderId });
         return;
       }
-      if (wallet.balance < pointCostSnapshot) {
+      if (wallet.balance < authoritativeCost) {
         tx.update(snap.ref, { status: 'rejected' });
-        logger.warn('Insufficient balance, rejecting order', { orderId, balance: wallet.balance, cost: pointCostSnapshot });
+        logger.warn('Insufficient balance, rejecting order', { orderId, balance: wallet.balance, cost: authoritativeCost });
         return;
       }
 
       tx.update(wallet.ref, {
-        balance: admin.firestore.FieldValue.increment(-pointCostSnapshot),
+        balance: admin.firestore.FieldValue.increment(-authoritativeCost),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      // 把 client 寫的 pointCostSnapshot 正規化成權威售價（顯示與退款一致）
+      tx.update(snap.ref, { pointCostSnapshot: authoritativeCost });
       tx.set(ptRef, {
         walletId: wallet.ref.id,
         childId,
-        delta: -pointCostSnapshot,
+        delta: -authoritativeCost,
         sourceType: 'reward_order',
         sourceId: orderId,
         createdBy: null,
@@ -73,6 +91,6 @@ export const onRewardOrderCreated = onDocumentCreated(
       });
     });
 
-    logger.info('Reward order processed', { orderId, childId, cost: pointCostSnapshot });
+    logger.info('Reward order processed', { orderId, childId, cost: authoritativeCost });
   }
 );

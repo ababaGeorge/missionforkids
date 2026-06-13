@@ -21,8 +21,10 @@ import { Starfield } from '../../design/Starfield';
 import { Display, BodySm, Label, AppText } from '../../design/Text';
 
 // dev 測試帳號（由 scripts/seed-dev-family.ts 建立的固定真帳號）。
-// __DEV__-gated，production build 會被移除。密碼為測試網域非機密值。
-const DEV_PASSWORD = 'mfk-dev-2026!';
+// __DEV__-gated，production build 會被移除。
+// A7：密碼不再寫死在原始碼（公開 repo 會洩漏）。改從環境變數讀，
+// 啟動 Metro 時帶 EXPO_PUBLIC_DEV_PASSWORD=... 才會自動填入；沒帶就留空手動輸入。
+const DEV_PASSWORD = process.env.EXPO_PUBLIC_DEV_PASSWORD ?? '';
 const DEV_ACCOUNTS = [
   { label: '家長', email: 'dev-parent@mfk.test' },
   { label: '小安', email: 'dev-kid1@mfk.test' },

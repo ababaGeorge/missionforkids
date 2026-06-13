@@ -21,6 +21,30 @@ export const onTaskInstanceApproved = onDocumentUpdated(
     // 只處理狀態變為 approved
     if (before.status === 'approved' || after.status !== 'approved') return;
 
+    // A1 縱深防禦：核准動作必須由該家庭的 active 家長發出（reviewedBy）。
+    // firestore.rules 已擋小孩自批，但若規則日後被放寬，這裡是第二道閘門——
+    // 沒有合法家長核准者就不發點。
+    const reviewerUid = after.reviewedBy as string | null | undefined;
+    if (!reviewerUid) {
+      logger.warn('approved without reviewedBy, skipping award', { instanceId: event.data?.after.id });
+      return;
+    }
+    const reviewerMembership = await db()
+      .collection('familyMemberships')
+      .doc(`${reviewerUid}_${after.familyId}`)
+      .get();
+    if (
+      !reviewerMembership.exists ||
+      reviewerMembership.data()?.role !== 'parent' ||
+      reviewerMembership.data()?.status !== 'active'
+    ) {
+      logger.warn('approver is not an active family parent, skipping award', {
+        instanceId: event.data?.after.id,
+        reviewerUid,
+      });
+      return;
+    }
+
     // 早退：已發過（事件層級快速判斷；transaction 內會再嚴格重讀）
     if (after.pointsAwarded != null) {
       logger.info('Points already awarded, skipping', { instanceId: event.data?.after.id });

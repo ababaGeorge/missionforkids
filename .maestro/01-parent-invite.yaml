@@ -1,0 +1,43 @@
+appId: com.missionforkids.app
+name: 01 家長送出邀請
+---
+# 若停在 sign-in，先以家長身分進入；若已登入則跳過
+- runFlow:
+    when:
+      visible:
+        text: "以家長身分進入"
+    commands:
+      - tapOn: "以家長身分進入"
+
+# 確保在家長首頁，點底部「設定」tab（= 家庭頁）
+- extendedWaitUntil:
+    visible:
+      text: "設定"
+    timeout: 30000
+- tapOn: "設定"
+
+# 右下 + FAB → Alert 選「用 Email 邀請小孩」
+- extendedWaitUntil:
+    visible:
+      text: "+"
+    timeout: 15000
+- tapOn: "+"
+- assertVisible: "用 Email 邀請小孩"
+- tapOn: "用 Email 邀請小孩"
+
+# 填小孩姓名 + email，送出
+- tapOn:
+    id: "invite-child-name"
+- inputText: "E2E小孩0528"
+- tapOn:
+    id: "invite-child-email"
+- inputText: "ababaplanet@gmail.com"
+- hideKeyboard
+- tapOn:
+    id: "invite-child-submit"
+
+# 預期成功 Alert
+- extendedWaitUntil:
+    visible:
+      text: "邀請已送出"
+    timeout: 30000

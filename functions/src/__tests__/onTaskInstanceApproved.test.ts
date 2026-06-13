@@ -16,6 +16,13 @@ async function seedChildMembership(uid: string, familyId: string, childId?: stri
     .doc(`${uid}_${familyId}`)
     .set({ familyId, userId: uid, role: 'child', status: 'active', ...(childId !== undefined ? { childId } : {}) });
 }
+// A1 縱深防禦：發點需要核准者是 active 家長。預設每個 family 都有一位家長 'rev'。
+async function seedParentMembership(uid: string, familyId: string) {
+  await db()
+    .collection('familyMemberships')
+    .doc(`${uid}_${familyId}`)
+    .set({ familyId, userId: uid, role: 'parent', status: 'active' });
+}
 async function seedInstance(id: string, data: any) {
   await db().collection('taskInstances').doc(id).set(data);
 }
@@ -36,11 +43,12 @@ function fireApproved(id: string, afterData: any, beforeOverride: any = {}) {
 }
 
 describe('onTaskInstanceApproved (childId 重構)', () => {
-  it('approved → 點數進確定性錢包 {familyId}_{server解析childId}', async () => {
+  it('approved（家長核准）→ 點數進確定性錢包 {familyId}_{server解析childId}', async () => {
     const familyId = 'fam';
     await seedTask('task-1', 15);
     await seedChildMembership('kid', familyId, 'kid');
-    const inst = { taskId: 'task-1', userId: 'kid', familyId, childId: 'kid', status: 'approved', pointsAwarded: null };
+    await seedParentMembership('rev', familyId);
+    const inst = { taskId: 'task-1', userId: 'kid', familyId, childId: 'kid', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
     await seedInstance('inst-1', inst);
 
     await fireApproved('inst-1', inst);
@@ -55,8 +63,9 @@ describe('onTaskInstanceApproved (childId 重構)', () => {
     const familyId = 'fam2';
     await seedTask('task-2', 10);
     await seedChildMembership('uidB', familyId, 'permB'); // 權威 childId = permB
+    await seedParentMembership('rev', familyId);
     // doc 上 childId 故意寫錯成 'evil'，server 應忽略、用 membership 的 permB
-    const inst = { taskId: 'task-2', userId: 'uidB', familyId, childId: 'evil', status: 'approved', pointsAwarded: null };
+    const inst = { taskId: 'task-2', userId: 'uidB', familyId, childId: 'evil', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
     await seedInstance('inst-2', inst);
 
     await fireApproved('inst-2', inst);
@@ -69,7 +78,8 @@ describe('onTaskInstanceApproved (childId 重構)', () => {
     const familyId = 'fam3';
     await seedTask('task-3', 20);
     await seedChildMembership('kid3', familyId, 'kid3');
-    const inst = { taskId: 'task-3', userId: 'kid3', familyId, childId: 'kid3', status: 'approved', pointsAwarded: null };
+    await seedParentMembership('rev', familyId);
+    const inst = { taskId: 'task-3', userId: 'kid3', familyId, childId: 'kid3', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
     await seedInstance('inst-3', inst);
 
     await fireApproved('inst-3', inst); // 第一次發點 → 標記 pointsAwarded
@@ -85,7 +95,8 @@ describe('onTaskInstanceApproved (childId 重構)', () => {
     const familyId = 'fam4';
     await seedTask('task-4', NaN as any);
     await seedChildMembership('kid4', familyId, 'kid4');
-    const inst = { taskId: 'task-4', userId: 'kid4', familyId, childId: 'kid4', status: 'approved', pointsAwarded: null };
+    await seedParentMembership('rev', familyId);
+    const inst = { taskId: 'task-4', userId: 'kid4', familyId, childId: 'kid4', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
     await seedInstance('inst-4', inst);
 
     await fireApproved('inst-4', inst);
@@ -96,11 +107,38 @@ describe('onTaskInstanceApproved (childId 重構)', () => {
     const familyId = 'fam5';
     await seedTask('task-5', 5);
     await seedChildMembership('kid5', familyId, 'kid5');
-    const inst = { taskId: 'task-5', userId: 'kid5', familyId, childId: 'kid5', status: 'approved', pointsAwarded: null };
+    await seedParentMembership('rev', familyId);
+    const inst = { taskId: 'task-5', userId: 'kid5', familyId, childId: 'kid5', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
     await seedInstance('inst-5', inst);
     await fireApproved('inst-5', inst);
     const wallets = await db().collection('pointWallets').where('familyId', '==', familyId).get();
     expect(wallets.size).toBe(1);
     expect(wallets.docs[0].id).toBe(`${familyId}_kid5`);
+  });
+
+  // A1 縱深防禦回歸測試：核准者不是 active 家長 → 不發點。
+  it('reviewedBy 不是家長（小孩自批）→ 不發點', async () => {
+    const familyId = 'fam6';
+    await seedTask('task-6', 99);
+    await seedChildMembership('kid6', familyId, 'kid6');
+    // 沒有家長核准；reviewedBy 指向小孩自己
+    const inst = { taskId: 'task-6', userId: 'kid6', familyId, childId: 'kid6', status: 'approved', pointsAwarded: null, reviewedBy: 'kid6' };
+    await seedInstance('inst-6', inst);
+
+    await fireApproved('inst-6', inst);
+
+    // 錢包不存在、沒發任何點
+    expect((await db().collection('pointWallets').doc(`${familyId}_kid6`).get()).exists).toBe(false);
+  });
+
+  it('沒有 reviewedBy → 不發點', async () => {
+    const familyId = 'fam7';
+    await seedTask('task-7', 30);
+    await seedChildMembership('kid7', familyId, 'kid7');
+    const inst = { taskId: 'task-7', userId: 'kid7', familyId, childId: 'kid7', status: 'approved', pointsAwarded: null, reviewedBy: null };
+    await seedInstance('inst-7', inst);
+
+    await fireApproved('inst-7', inst);
+    expect((await db().collection('pointWallets').doc(`${familyId}_kid7`).get()).exists).toBe(false);
   });
 });

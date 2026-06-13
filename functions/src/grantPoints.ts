@@ -16,11 +16,12 @@ export const grantPoints = onCall(async (request) => {
     throw new HttpsError('unauthenticated', 'Must be signed in');
   }
 
-  const { childUserId, familyId, amount, reason } = request.data as {
+  const { childUserId, familyId, amount, reason, idempotencyKey } = request.data as {
     childUserId: string;
     familyId: string;
     amount: number;
     reason: string;
+    idempotencyKey?: string;
   };
 
   if (!childUserId || !familyId) {
@@ -50,6 +51,15 @@ export const grantPoints = onCall(async (request) => {
 
   // Atomic transaction: 找或建確定性錢包 + 寫 transaction
   await db.runTransaction(async (tx) => {
+    // A9 冪等：有 idempotencyKey 時用確定性 tx doc id，重送/連點同一 key 不重複發點。
+    const txRef = idempotencyKey
+      ? db.collection('pointTransactions').doc(`parent_grant_${idempotencyKey}`)
+      : db.collection('pointTransactions').doc();
+    if (idempotencyKey) {
+      const existing = await tx.get(txRef); // 讀必須在任何 write 之前
+      if (existing.exists) return; // 已處理過，直接結束
+    }
+
     // tx.get 在任何 write 之前
     const wallet = await resolveChildWallet(tx, db, familyId, childId);
 
@@ -74,7 +84,6 @@ export const grantPoints = onCall(async (request) => {
     }
 
     if (delta !== 0) {
-      const txRef = db.collection('pointTransactions').doc();
       tx.set(txRef, {
         walletId: wallet.ref.id,
         childId,
