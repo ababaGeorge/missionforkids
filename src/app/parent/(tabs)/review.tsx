@@ -119,6 +119,7 @@ export default function ParentReview() {
           const instance = { id: doc.id, ...doc.data() } as TaskInstance;
           const subSnap = await firestore()
             .collection('taskSubmissions')
+            .where('familyId', '==', family.id)
             .where('taskInstanceId', '==', instance.id)
             .orderBy('submittedAt', 'desc')
             .limit(1)

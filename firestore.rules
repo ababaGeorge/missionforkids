@@ -1,5 +1,20 @@
 rules_version = '2';
 
+// =============================================================================
+// 安全加固版（feat/security-hardening-demo）
+// 修復項目（對照 2026-06-13 QA 審查報告）：
+//   A1  小孩自批任務無限發點 → taskInstances 狀態流轉鎖：只有家長能 approve/reject
+//   A3  任何人自升 parent / 跨家庭接管 → familyMemberships create/update 嚴格綁定
+//   A4  兒童照片全表可讀 → taskSubmissions read 加家庭隔離
+//   A5  email/個資全表可枚舉 → users list 鎖成只能查自己（get 仍放行，因 uid 已不可枚舉）
+//   A6  小孩自批兌換訂單 → rewardOrders 狀態流轉鎖
+//   A10 家庭關係圖可列舉 → familyMemberships read 加家庭隔離
+//   A11 跨家庭注入垃圾 → 各 create 綁 isFamilyParent(該家庭)
+//   A12 帳本/家庭名全表可讀 → pointTransactions read 鎖死、families read 加隔離
+//   A16 邀請連結外洩讀 email → familyInvites get 僅限 pending 且未過期
+// 核心原則維持：所有點數寫入只走 Cloud Functions（admin SDK，繞過本規則）。
+// =============================================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,122 +24,175 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // 檢查使用者是否為指定家庭的 active 成員（doc ID = userId_familyId）
+    // 指定家庭的 active 成員（membership doc id = userId_familyId）
     function isFamilyMember(familyId) {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)) &&
         get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.status == 'active';
     }
 
-    // 檢查使用者是否為指定家庭的家長
+    // 指定家庭的 active 家長
     function isFamilyParent(familyId) {
       return isSignedIn() &&
+        exists(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)) &&
         get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.role == 'parent' &&
         get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.status == 'active';
     }
 
     // ========== Users ==========
+    // get：放行已登入者讀單一 doc（家長需用 uid 直查小孩 user doc 顯示名字；
+    //      uid 已無法被枚舉——familyMemberships list 已鎖，外人拿不到其他家庭的 uid）。
+    // list：只能查自己（authProviderId == 自己 uid），擋掉全表 email 枚舉（A5）。
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && resource.data.authProviderId == request.auth.uid;
+      allow create: if isSignedIn() && request.auth.uid == userId;
       allow update: if isSignedIn() && request.auth.uid == userId;
     }
 
     // ========== Families ==========
     match /families/{familyId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read: if isFamilyMember(familyId);
+      // 建家庭：client 端 handleCreateFamily 直接寫，createdBy 必須是自己
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isFamilyParent(familyId);
     }
 
     // ========== Family Memberships ==========
-    // doc ID 格式: userId_familyId
+    // doc id 格式: userId_familyId
     match /familyMemberships/{membershipId} {
-      allow read: if isSignedIn();
-      // 只有已登入使用者可以建立自己的 membership（或家長邀請）
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
+      // 讀：自己的 membership（找自己的家庭）或同家庭成員（列成員）。擋全表枚舉（A10）。
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isFamilyMember(resource.data.familyId)
+      );
+      // 建：只允許「在自己剛建立的家庭、為自己、建 parent membership」。
+      // 子帳號/跨家庭的 membership 一律由 Cloud Functions(admin) 建立，不走這條（A3）。
+      allow create: if isSignedIn()
+        && membershipId == request.auth.uid + '_' + request.resource.data.familyId
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.role == 'parent'
+        && request.resource.data.status == 'active'
+        && get(/databases/$(database)/documents/families/$(request.resource.data.familyId)).data.createdBy == request.auth.uid;
+      // 改：只有該家庭家長可改（暱稱/頭像/移除成員），且 userId/familyId/role 不可變（擋自升 parent，A3）。
+      allow update: if isFamilyParent(resource.data.familyId)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.role == resource.data.role;
+      allow delete: if false;
     }
 
     // ========== Family Invites（email 邀請）==========
-    // inviteId 為隨機不可猜 doc id（= 邀請連結秘密）。允許單 doc get（接受畫面 pre-auth 顯示），
-    // 禁 list；寫入只走 Cloud Functions (admin)。
+    // inviteId 為隨機不可猜 doc id。get 僅限 pending 且未過期（A16：接受/過期後不再洩漏 email）。
+    // list 禁止枚舉；寫入只走 Cloud Functions(admin)。
     match /familyInvites/{inviteId} {
-      allow get: if true;
+      allow get: if resource.data.status == 'pending'
+        && resource.data.expiresAt > request.time;
       allow list: if false;
       allow write: if false;
     }
 
     // ========== Tasks ==========
-    // 只有同家庭的成員可以存取
     match /tasks/{taskId} {
-      allow read: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
-      allow delete: if isSignedIn() &&
-        isFamilyParent(resource.data.familyId);
+      allow read: if isFamilyMember(resource.data.familyId);
+      // 只有該家庭家長能建任務（擋跨家庭注入 A11、擋小孩自建任務閉環 A1）
+      allow create: if isFamilyParent(request.resource.data.familyId);
+      allow update: if isFamilyParent(resource.data.familyId)
+        && request.resource.data.familyId == resource.data.familyId;
+      allow delete: if isFamilyParent(resource.data.familyId);
     }
 
     // ========== Task Instances ==========
+    // A1 核心修復：核准（→approved/rejected/missed）只有家長能做；
+    // 小孩只能把狀態推到 submitted/pending（提交/重拍），永遠碰不到 approved → 無法自我發點。
     match /taskInstances/{instanceId} {
-      allow read: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
+      allow read: if isFamilyMember(resource.data.familyId);
+      // 建 instance 只有家長（發佈任務時）。週期任務未來由 CF(admin) 自動生成。
+      allow create: if isFamilyParent(request.resource.data.familyId);
+      allow update: if isFamilyMember(resource.data.familyId) && (
+        // 家長：可做審核狀態流轉（approve/reject/missed）
+        isFamilyParent(resource.data.familyId)
+        ||
+        // 非家長成員（小孩）：只能 submit/pending，且不可動 pointsAwarded / 身分欄位
+        (
+          request.resource.data.status in ['submitted', 'pending']
+          && request.resource.data.familyId == resource.data.familyId
+          && request.resource.data.taskId == resource.data.taskId
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.get('pointsAwarded', null) == resource.data.get('pointsAwarded', null)
+        )
+      );
     }
 
     // ========== Task Submissions ==========
+    // A4 修復：read 加家庭隔離（client 查詢已改為帶 where familyId）。
     match /taskSubmissions/{submissionId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      // 允許家長更新（寫 rejectNote）
-      allow update: if isSignedIn();
+      allow read: if isFamilyMember(resource.data.familyId);
+      // 小孩提交：必須是該家庭成員、submittedBy 是自己
+      allow create: if isFamilyMember(request.resource.data.familyId)
+        && request.resource.data.submittedBy == request.auth.uid;
+      // 家長退回時寫 rejectNote
+      allow update: if isFamilyParent(resource.data.familyId);
     }
 
     // ========== Point Wallets ==========
-    // 建立：使用者只能建立自己的 wallet，且初始餘額必須為 0
-    // 更新/刪除：只有 Cloud Functions (admin SDK)
+    // 讀：同家庭成員（含小孩讀自己錢包、家長讀小孩錢包）。寫入一律只走 Cloud Functions。
     match /pointWallets/{walletId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.balance == 0;
-      allow update, delete: if false;
+      allow read: if isFamilyMember(resource.data.familyId);
+      allow create, update, delete: if false;
     }
 
     // ========== Point Transactions ==========
-    // 只有 Cloud Functions (admin SDK) 可以寫入
+    // A12 修復：帳本只有 Cloud Functions(admin) 讀寫，client 一律不可讀（目前 App 無任何 client 讀取）。
     match /pointTransactions/{transactionId} {
-      allow read: if isSignedIn();
+      allow read: if false;
       allow write: if false;
     }
 
     // ========== Reward Items ==========
     match /rewardItems/{itemId} {
-      allow read: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
-        isFamilyParent(resource.data.familyId);
+      allow read: if isFamilyMember(resource.data.familyId);
+      // 只有家長能建/改獎勵（擋跨家庭注入 A11）
+      allow create: if isFamilyParent(request.resource.data.familyId);
+      allow update: if isFamilyParent(resource.data.familyId)
+        && request.resource.data.familyId == resource.data.familyId;
     }
 
     // ========== Reward Orders ==========
+    // A6 修復：核准（→approved）只有家長；小孩只能建單(pending)、確認收到(→completed)、取消(pending→cancelled)。
     match /rewardOrders/{orderId} {
-      allow read: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
-        isFamilyMember(resource.data.familyId);
+      allow read: if isFamilyMember(resource.data.familyId);
+      // 小孩建自己的訂單，初始 pending
+      allow create: if isFamilyMember(request.resource.data.familyId)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if isFamilyMember(resource.data.familyId) && (
+        // 家長：核准 / 拒絕 / 交付
+        isFamilyParent(resource.data.familyId)
+        ||
+        // 訂單擁有者（小孩）：金額/品項/身分不可變，且僅限兩種合法流轉
+        (
+          resource.data.userId == request.auth.uid
+          && request.resource.data.pointCostSnapshot == resource.data.pointCostSnapshot
+          && request.resource.data.familyId == resource.data.familyId
+          && request.resource.data.itemId == resource.data.itemId
+          && request.resource.data.userId == resource.data.userId
+          && (
+            // 確認收到：approved/delivered → completed
+            (resource.data.status in ['approved', 'delivered'] && request.resource.data.status == 'completed')
+            ||
+            // 取消（B5 真取消）：只能在 pending 取消，避免「領獎又退點」
+            (resource.data.status == 'pending' && request.resource.data.status == 'cancelled')
+          )
+        )
+      );
     }
 
     // ========== AI Playground Logs ==========
+    // 只有 analyzePhoto CF(admin) 寫入；client 從函式回傳值取得結果，不直接讀此集合。
     match /aiPlaygroundLogs/{logId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read: if false;
+      allow write: if false;
     }
   }
 }
