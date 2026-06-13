@@ -9,6 +9,29 @@ const openaiApiKey = defineSecret('OPENAI_API_KEY');
 interface AnalyzeRequest {
   photoUrl: string;
   taskDescription?: string;
+  // B1：若帶 submissionId，CF 會把 AI 判斷寫回該 submission（admin SDK，
+  // 不需放寬 taskSubmissions 的 client 寫入規則）。僅限提交者本人。
+  submissionId?: string;
+}
+
+/**
+ * 把 AI 判斷寫回 taskSubmissions（限提交者本人）。失敗不阻斷主流程。
+ */
+async function writeBackAiResult(
+  submissionId: string | undefined,
+  callerUid: string,
+  aiResult: string,
+  confidence: number | null
+): Promise<void> {
+  if (!submissionId) return;
+  try {
+    const ref = admin.firestore().collection('taskSubmissions').doc(submissionId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data()?.submittedBy !== callerUid) return; // 只能標自己的提交
+    await ref.update({ aiResult, aiConfidence: confidence });
+  } catch (e) {
+    logger.warn('writeBackAiResult failed (non-fatal)', { submissionId, err: String(e) });
+  }
 }
 
 /**
@@ -28,10 +51,26 @@ export const analyzePhoto = onCall(
       throw new HttpsError('unauthenticated', 'Must be signed in');
     }
 
-    const { photoUrl, taskDescription } = request.data as AnalyzeRequest;
+    const { photoUrl, taskDescription, submissionId } = request.data as AnalyzeRequest;
+    const callerUid = request.auth.uid;
 
     if (!photoUrl) {
       throw new HttpsError('invalid-argument', 'photoUrl is required');
+    }
+
+    // Emulator 模式：OpenAI 無法存取 localhost 的 storage URL，回傳確定性 mock，
+    // 讓 AI 審核流程在本機/雙模擬器 demo 可以跑完。production 不受影響。
+    if (process.env.FUNCTIONS_EMULATOR === 'true') {
+      const mock = {
+        result: 'pass',
+        messageZh: taskDescription
+          ? `太棒了！看起來你完成了「${taskDescription}」，繼續保持！`
+          : '我看到你的照片了，做得很好！',
+        messageEn: 'Great job! Looks done to me!',
+      };
+      await writeBackAiResult(submissionId, callerUid, mock.result, 0.9);
+      logger.info('AI analysis (emulator mock)', { userId: callerUid, submissionId });
+      return mock;
     }
 
     const openai = new OpenAI({ apiKey: openaiApiKey.value() });
@@ -89,6 +128,8 @@ export const analyzePhoto = onCall(
         model: 'gpt-4o-mini',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      await writeBackAiResult(submissionId, callerUid, result.result, null);
 
       logger.info('AI analysis complete', {
         userId: request.auth.uid,
