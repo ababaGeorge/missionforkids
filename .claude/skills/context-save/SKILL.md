@@ -1,1 +1,0 @@
-/Users/ababa_george/conductor/workspaces/missionforkids/manado/.claude/skills/gstack/context-save/SKILL.md
