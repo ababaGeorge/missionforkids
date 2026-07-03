@@ -1,0 +1,4 @@
+appId: com.missionforkids.app
+---
+- tapOn:
+    text: "好"

@@ -17,6 +17,10 @@ async function seedChildMembership(uid: string, familyId: string, childId?: stri
 async function seedWallet(familyId: string, childId: string, balance: number) {
   await db().collection('pointWallets').doc(`${familyId}_${childId}`).set({ childId, userId: childId, familyId, balance });
 }
+// A2：扣點金額的權威來源。每筆訂單對應一個 rewardItems doc。
+async function seedRewardItem(itemId: string, familyId: string, pointCost: number, status = 'active') {
+  await db().collection('rewardItems').doc(itemId).set({ familyId, pointCost, status, title: 'item' });
+}
 async function seedOrder(orderId: string, data: any) {
   await db().collection('rewardOrders').doc(orderId).set(data);
 }
@@ -25,18 +29,19 @@ function fireCreated(orderId: string, data: any) {
   const snap = fft.firestore.makeDocumentSnapshot(data, `rewardOrders/${orderId}`);
   return fft.wrap(onRewardOrderCreated)({ data: snap, params: { orderId } } as any);
 }
-function fireRefund(orderId: string, data: any, toStatus: 'cancelled' | 'rejected' = 'cancelled') {
-  const beforeSnap = fft.firestore.makeDocumentSnapshot({ ...data, status: 'pending' }, `rewardOrders/${orderId}`);
+function fireRefund(orderId: string, data: any, toStatus: 'cancelled' | 'rejected' = 'cancelled', beforeStatus = 'pending') {
+  const beforeSnap = fft.firestore.makeDocumentSnapshot({ ...data, status: beforeStatus }, `rewardOrders/${orderId}`);
   const afterSnap = fft.firestore.makeDocumentSnapshot({ ...data, status: toStatus }, `rewardOrders/${orderId}`);
   return fft.wrap(onRewardOrderCancelledOrRejected)({ data: { before: beforeSnap, after: afterSnap }, params: { orderId } } as any);
 }
 
 describe('onRewardOrderCreated (扣點)', () => {
-  it('扣點從確定性錢包 {familyId}_{childId}，deduction tx id = reward_order_{orderId}', async () => {
+  it('扣點從確定性錢包 {familyId}_{childId}，金額取自 rewardItems 權威售價', async () => {
     const familyId = 'f';
     await seedChildMembership('kid', familyId, 'kid');
     await seedWallet(familyId, 'kid', 100);
-    const order = { userId: 'kid', familyId, pointCostSnapshot: 30, status: 'pending' };
+    await seedRewardItem('item-1', familyId, 30);
+    const order = { userId: 'kid', familyId, itemId: 'item-1', pointCostSnapshot: 30, status: 'pending' };
     await seedOrder('ord-1', order);
     await fireCreated('ord-1', order);
 
@@ -45,11 +50,28 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect(pt.data()).toMatchObject({ walletId: `${familyId}_kid`, delta: -30, sourceType: 'reward_order' });
   });
 
+  // A2 核心回歸：client 謊報 pointCostSnapshot=1，但實際扣的是 item 權威售價 30。
+  it('client 謊報便宜價 → 仍扣 rewardItems 權威售價（A2）', async () => {
+    const familyId = 'fA2';
+    await seedChildMembership('kidA2', familyId, 'kidA2');
+    await seedWallet(familyId, 'kidA2', 100);
+    await seedRewardItem('item-A2', familyId, 30); // 真實售價 30
+    const order = { userId: 'kidA2', familyId, itemId: 'item-A2', pointCostSnapshot: 1, status: 'pending' }; // 謊報 1
+    await seedOrder('ord-A2', order);
+    await fireCreated('ord-A2', order);
+
+    // 扣 30 不是 1
+    expect((await db().collection('pointWallets').doc(`${familyId}_kidA2`).get()).data()?.balance).toBe(70);
+    // 訂單 pointCostSnapshot 被正規化成權威售價
+    expect((await db().collection('rewardOrders').doc('ord-A2').get()).data()?.pointCostSnapshot).toBe(30);
+  });
+
   it('childId != userId → 扣 childId 錢包', async () => {
     const familyId = 'f2';
     await seedChildMembership('uidX', familyId, 'permX');
     await seedWallet(familyId, 'permX', 50);
-    const order = { userId: 'uidX', familyId, pointCostSnapshot: 20, status: 'pending' };
+    await seedRewardItem('item-2', familyId, 20);
+    const order = { userId: 'uidX', familyId, itemId: 'item-2', pointCostSnapshot: 20, status: 'pending' };
     await seedOrder('ord-2', order);
     await fireCreated('ord-2', order);
     expect((await db().collection('pointWallets').doc(`${familyId}_permX`).get()).data()?.balance).toBe(30);
@@ -59,7 +81,8 @@ describe('onRewardOrderCreated (扣點)', () => {
     const familyId = 'f3';
     await seedChildMembership('k3', familyId, 'k3');
     await seedWallet(familyId, 'k3', 10);
-    const order = { userId: 'k3', familyId, pointCostSnapshot: 50, status: 'pending' };
+    await seedRewardItem('item-3', familyId, 50);
+    const order = { userId: 'k3', familyId, itemId: 'item-3', pointCostSnapshot: 50, status: 'pending' };
     await seedOrder('ord-3', order);
     await fireCreated('ord-3', order);
     expect((await db().collection('rewardOrders').doc('ord-3').get()).data()?.status).toBe('rejected');
@@ -70,22 +93,36 @@ describe('onRewardOrderCreated (扣點)', () => {
     const familyId = 'f4';
     await seedChildMembership('k4', familyId, 'k4');
     await seedWallet(familyId, 'k4', 100);
-    const order = { userId: 'k4', familyId, pointCostSnapshot: 25, status: 'pending' };
+    await seedRewardItem('item-4', familyId, 25);
+    const order = { userId: 'k4', familyId, itemId: 'item-4', pointCostSnapshot: 25, status: 'pending' };
     await seedOrder('ord-4', order);
     await fireCreated('ord-4', order);
     await fireCreated('ord-4', order);
     expect((await db().collection('pointWallets').doc(`${familyId}_k4`).get()).data()?.balance).toBe(75);
   });
 
-  it('pointCostSnapshot malformed → reject', async () => {
+  it('rewardItems 不存在 → reject、不扣點（A2）', async () => {
     const familyId = 'f5';
     await seedChildMembership('k5', familyId, 'k5');
     await seedWallet(familyId, 'k5', 100);
-    const order = { userId: 'k5', familyId, pointCostSnapshot: NaN, status: 'pending' };
+    // 不 seed item
+    const order = { userId: 'k5', familyId, itemId: 'ghost-item', pointCostSnapshot: 10, status: 'pending' };
     await seedOrder('ord-5', order);
     await fireCreated('ord-5', order);
     expect((await db().collection('rewardOrders').doc('ord-5').get()).data()?.status).toBe('rejected');
     expect((await db().collection('pointWallets').doc(`${familyId}_k5`).get()).data()?.balance).toBe(100);
+  });
+
+  it('rewardItems 已封存（archived）→ reject、不扣點（A2）', async () => {
+    const familyId = 'f6';
+    await seedChildMembership('k6', familyId, 'k6');
+    await seedWallet(familyId, 'k6', 100);
+    await seedRewardItem('item-6', familyId, 20, 'archived');
+    const order = { userId: 'k6', familyId, itemId: 'item-6', pointCostSnapshot: 20, status: 'pending' };
+    await seedOrder('ord-6', order);
+    await fireCreated('ord-6', order);
+    expect((await db().collection('rewardOrders').doc('ord-6').get()).data()?.status).toBe('rejected');
+    expect((await db().collection('pointWallets').doc(`${familyId}_k6`).get()).data()?.balance).toBe(100);
   });
 });
 
@@ -94,7 +131,8 @@ describe('onRewardOrderCancelledOrRejected (退款)', () => {
     const familyId = 'g';
     await seedChildMembership('uidA', familyId, 'childA');
     await seedWallet(familyId, 'childA', 100);
-    const order = { userId: 'uidA', familyId, pointCostSnapshot: 30, status: 'pending' };
+    await seedRewardItem('item-g', familyId, 30);
+    const order = { userId: 'uidA', familyId, itemId: 'item-g', pointCostSnapshot: 30, status: 'pending' };
     await seedOrder('g-ord', order);
     await fireCreated('g-ord', order); // 扣到 g_childA → 70
 
@@ -115,7 +153,8 @@ describe('onRewardOrderCancelledOrRejected (退款)', () => {
     const familyId = 'g2';
     await seedChildMembership('k', familyId, 'k');
     await seedWallet(familyId, 'k', 100);
-    const order = { userId: 'k', familyId, pointCostSnapshot: 40, status: 'pending' };
+    await seedRewardItem('item-g2', familyId, 40);
+    const order = { userId: 'k', familyId, itemId: 'item-g2', pointCostSnapshot: 40, status: 'pending' };
     await seedOrder('g2-ord', order);
     await fireCreated('g2-ord', order); // 60
     await fireRefund('g2-ord', order, 'cancelled'); // 100
@@ -127,10 +166,25 @@ describe('onRewardOrderCancelledOrRejected (退款)', () => {
     const familyId = 'g3';
     await seedChildMembership('k', familyId, 'k');
     await seedWallet(familyId, 'k', 100);
-    const order = { userId: 'k', familyId, pointCostSnapshot: 40, status: 'pending' };
+    const order = { userId: 'k', familyId, itemId: 'item-g3', pointCostSnapshot: 40, status: 'pending' };
     await seedOrder('g3-ord', order);
     await fireRefund('g3-ord', order, 'rejected');
     expect((await db().collection('pointWallets').doc(`${familyId}_k`).get()).data()?.balance).toBe(100);
     expect((await db().collection('pointTransactions').doc('reward_refund_g3-ord').get()).exists).toBe(false);
+  });
+
+  // 防「領獎又退點」：已交付的訂單即使被改 cancelled 也不退款。
+  it('已交付訂單被取消 → 不退款', async () => {
+    const familyId = 'g4';
+    await seedChildMembership('k', familyId, 'k');
+    await seedWallet(familyId, 'k', 100);
+    await seedRewardItem('item-g4', familyId, 40);
+    const order = { userId: 'k', familyId, itemId: 'item-g4', pointCostSnapshot: 40, status: 'pending' };
+    await seedOrder('g4-ord', order);
+    await fireCreated('g4-ord', order); // 扣 40 → 60
+    // before.status = delivered（已交付）→ cancelled，應該不退
+    await fireRefund('g4-ord', order, 'cancelled', 'delivered');
+    expect((await db().collection('pointWallets').doc(`${familyId}_k`).get()).data()?.balance).toBe(60);
+    expect((await db().collection('pointTransactions').doc('reward_refund_g4-ord').get()).exists).toBe(false);
   });
 });

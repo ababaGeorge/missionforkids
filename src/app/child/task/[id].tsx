@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
+import functions from '@react-native-firebase/functions';
 import type { Task, TaskInstance } from '../../../types/models';
 import { resolveMyChildId, walletDocId } from '../../../lib/childId';
 import { pickPhoto, uploadPhoto } from '../../../lib/photoUpload';
@@ -131,7 +132,10 @@ export default function ChildTaskDetail() {
     try {
       setSubmitting(true);
       const photoUrl = await uploadPhoto(instance.familyId, photoUri);
-      await firestore().collection('taskSubmissions').add({
+      // submission + instance 狀態用同一個 batch 原子寫入，計數用 server-side increment
+      const subRef = firestore().collection('taskSubmissions').doc();
+      const batch = firestore().batch();
+      batch.set(subRef, {
         taskInstanceId: instance.id,
         familyId: instance.familyId,
         submittedBy: uid,
@@ -141,16 +145,27 @@ export default function ChildTaskDetail() {
         aiConfidence: null,
         submittedAt: firestore.FieldValue.serverTimestamp(),
       });
-      await firestore()
-        .collection('taskInstances')
-        .doc(instance.id)
-        .update({
-          status: 'submitted',
-          submissionCount: (instance.submissionCount || 0) + 1,
-          submittedAt: firestore.FieldValue.serverTimestamp(),
-        });
+      batch.update(firestore().collection('taskInstances').doc(instance.id), {
+        status: 'submitted',
+        submissionCount: firestore.FieldValue.increment(1),
+        submittedAt: firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
       setPhotoUri(null);
       setNote('');
+      // B1：AI 小幫手看照片給鼓勵（非阻斷；CF 會把判斷寫回 submission 供家長參考）。
+      try {
+        const fn = functions().httpsCallable('analyzePhoto');
+        const res = await fn({
+          photoUrl,
+          taskDescription: task.title,
+          submissionId: subRef.id,
+        });
+        const msg = (res.data as any)?.messageZh;
+        if (msg) Alert.alert('🤖 AI 小幫手', msg);
+      } catch {
+        // AI 失敗不影響提交，靜默略過
+      }
     } catch (e) {
       Alert.alert('上傳失敗', '檢查一下網路，再試一次。');
     } finally {
@@ -168,7 +183,8 @@ export default function ChildTaskDetail() {
     }
     try {
       setSubmitting(true);
-      await firestore().collection('taskSubmissions').add({
+      const batch = firestore().batch();
+      batch.set(firestore().collection('taskSubmissions').doc(), {
         taskInstanceId: instance.id,
         familyId: instance.familyId,
         submittedBy: uid,
@@ -178,14 +194,12 @@ export default function ChildTaskDetail() {
         aiConfidence: null,
         submittedAt: firestore.FieldValue.serverTimestamp(),
       });
-      await firestore()
-        .collection('taskInstances')
-        .doc(instance.id)
-        .update({
-          status: 'submitted',
-          submissionCount: (instance.submissionCount || 0) + 1,
-          submittedAt: firestore.FieldValue.serverTimestamp(),
-        });
+      batch.update(firestore().collection('taskInstances').doc(instance.id), {
+        status: 'submitted',
+        submissionCount: firestore.FieldValue.increment(1),
+        submittedAt: firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
       setPhotoUri(null);
       setNote('');
     } catch (e: any) {
@@ -403,7 +417,7 @@ export default function ChildTaskDetail() {
               </>
             )}
           </Pressable>
-          {canSubmit && (
+          {__DEV__ && canSubmit && (
             <Pressable
               onPress={handleDevSubmitNoPhoto}
               disabled={submitting}

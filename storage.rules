@@ -3,9 +3,12 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // 檢查使用者是否為指定家庭的成員
+    // 檢查使用者是否為指定家庭的 active 成員（A17：與 firestore.rules 一致，須 status==active，
+    // 否則被移除/停用的成員仍可存取家庭照片）
     function isFamilyMember(familyId) {
-      return firestore.exists(/databases/(default)/documents/familyMemberships/$(request.auth.uid + '_' + familyId));
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/familyMemberships/$(request.auth.uid + '_' + familyId))
+        && firestore.get(/databases/(default)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.status == 'active';
     }
 
     // 家庭任務照片：families/{familyId}/submissions/{fileName}

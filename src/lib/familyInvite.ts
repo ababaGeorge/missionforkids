@@ -23,6 +23,6 @@ export async function getFamilyInvite(
   inviteId: string
 ): Promise<FamilyInvite | null> {
   const snap = await firestore().collection('familyInvites').doc(inviteId).get();
-  if (!snap.exists) return null;
+  if (!snap.exists()) return null;
   return { id: snap.id, ...(snap.data() as object) } as FamilyInvite;
 }

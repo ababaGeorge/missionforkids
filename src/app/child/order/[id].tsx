@@ -89,6 +89,32 @@ export default function ChildOrderDetail() {
     }
   };
 
+  // B5：真·取消訂單（原本只是關閉畫面）。改 status → cancelled，
+  // 觸發退款 CF 把點數退回。只能在 pending 階段取消（rules 已限制）。
+  const handleCancel = () => {
+    if (!order || submitting) return;
+    Alert.alert('取消訂單', '確定要取消這次兌換？花掉的點數會退回給你。', [
+      { text: '不取消', style: 'cancel' },
+      {
+        text: '取消訂單',
+        style: 'destructive',
+        onPress: async () => {
+          setSubmitting(true);
+          try {
+            await firestore().collection('rewardOrders').doc(order.id).update({
+              status: 'cancelled',
+              cancelledAt: firestore.FieldValue.serverTimestamp(),
+            });
+            onClose();
+          } catch {
+            Alert.alert('出錯了', '再試一次。');
+            setSubmitting(false);
+          }
+        },
+      },
+    ]);
+  };
+
   if (!order || !item) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -219,7 +245,11 @@ export default function ChildOrderDetail() {
       </ScrollView>
       {/* Footer: two buttons */}
       <View style={styles.footer}>
-        <Pressable onPress={onClose} style={styles.cancelBtn}>
+        <Pressable
+          onPress={order.status === 'pending' ? handleCancel : onClose}
+          disabled={submitting}
+          style={[styles.cancelBtn, submitting && { opacity: 0.6 }]}
+        >
           <Label style={{ color: P.muted, fontSize: 14 }}>
             {order.status === 'pending' ? '取消訂單' : '回到主頁'}
           </Label>

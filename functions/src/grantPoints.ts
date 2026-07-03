@@ -16,11 +16,12 @@ export const grantPoints = onCall(async (request) => {
     throw new HttpsError('unauthenticated', 'Must be signed in');
   }
 
-  const { childUserId, familyId, amount, reason } = request.data as {
+  const { childUserId, familyId, amount, reason, idempotencyKey } = request.data as {
     childUserId: string;
     familyId: string;
     amount: number;
     reason: string;
+    idempotencyKey?: string;
   };
 
   if (!childUserId || !familyId) {
@@ -31,13 +32,30 @@ export const grantPoints = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'amount 必須是非零的有限整數');
   }
 
-  // 驗證呼叫者是家長
+  // 驗證呼叫者是「active」家長。被移除的家長 membership 仍在、role 仍是 'parent'，
+  // 必須連 status==='active' 一起驗，否則被踢出家庭的家長還能給/扣點。
   const parentMemberDoc = await db
     .collection('familyMemberships')
     .doc(`${uid}_${familyId}`)
     .get();
-  if (!parentMemberDoc.exists || parentMemberDoc.data()?.role !== 'parent') {
-    throw new HttpsError('permission-denied', 'Only parents can grant points');
+  const parentData = parentMemberDoc.data();
+  if (!parentMemberDoc.exists || parentData?.role !== 'parent' || parentData?.status !== 'active') {
+    throw new HttpsError('permission-denied', 'Only active parents can grant points');
+  }
+
+  // 驗證收點對象是該家庭的 active 小孩：
+  // - 擋發點給「被移除的小孩」（status==='removed'）
+  // - 擋把非 child 成員（如另一位家長）指定為收點對象
+  // 註：這裡多讀一次 membership（resolveAuthoritativeChildId 只回 childId、不回 status/role，
+  //     且它是 onRewardOrderCreated / onTaskInstanceApproved 共用，不宜為此加 status 檢查而
+  //     波及其他路徑），故在本地端顯式驗證。
+  const childMemberDoc = await db
+    .collection('familyMemberships')
+    .doc(`${childUserId}_${familyId}`)
+    .get();
+  const childData = childMemberDoc.data();
+  if (!childMemberDoc.exists || childData?.role !== 'child' || childData?.status !== 'active') {
+    throw new HttpsError('not-found', 'Child is not an active member of this family');
   }
 
   // 解析權威 childId（server 端，不信任 client）。child 不屬該家庭 → 拋錯。
@@ -50,6 +68,15 @@ export const grantPoints = onCall(async (request) => {
 
   // Atomic transaction: 找或建確定性錢包 + 寫 transaction
   await db.runTransaction(async (tx) => {
+    // A9 冪等：有 idempotencyKey 時用確定性 tx doc id，重送/連點同一 key 不重複發點。
+    const txRef = idempotencyKey
+      ? db.collection('pointTransactions').doc(`parent_grant_${idempotencyKey}`)
+      : db.collection('pointTransactions').doc();
+    if (idempotencyKey) {
+      const existing = await tx.get(txRef); // 讀必須在任何 write 之前
+      if (existing.exists) return; // 已處理過，直接結束
+    }
+
     // tx.get 在任何 write 之前
     const wallet = await resolveChildWallet(tx, db, familyId, childId);
 
@@ -74,7 +101,6 @@ export const grantPoints = onCall(async (request) => {
     }
 
     if (delta !== 0) {
-      const txRef = db.collection('pointTransactions').doc();
       tx.set(txRef, {
         walletId: wallet.ref.id,
         childId,

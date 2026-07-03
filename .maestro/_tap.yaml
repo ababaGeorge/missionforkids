@@ -1,0 +1,6 @@
+appId: com.missionforkids.app
+---
+# 密碼已輸入；按 Enter 讓單行欄位 blur 收鍵盤，再點送出
+- pressKey: Enter
+- tapOn:
+    point: "50%,62%"

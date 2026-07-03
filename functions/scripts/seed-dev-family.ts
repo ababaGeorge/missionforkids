@@ -33,8 +33,11 @@ const admin = require('firebase-admin') as typeof import('firebase-admin');
 const PROJECT_ID = 'mission-for-kids';
 const FAMILY_ID = 'dev-family-seed';
 const FAMILY_NAME = 'Dev 測試家庭';
-// Non-secret test credential for the throwaway @mfk.test domain. Overridable via env.
-const DEV_PASSWORD = process.env.DEV_SEED_PASSWORD ?? 'mfk-dev-2026!';
+// A7：密碼不再寫死（公開 repo 會洩漏）。一律從環境變數讀，缺少就中止。
+const DEV_PASSWORD = process.env.DEV_SEED_PASSWORD;
+if (!DEV_PASSWORD) {
+  throw new Error('DEV_SEED_PASSWORD 環境變數必填（避免把密碼 commit 進原始碼）');
+}
 
 const PARENT = { uid: 'dev-parent', email: 'dev-parent@mfk.test', displayName: '測試家長' };
 const KIDS = [

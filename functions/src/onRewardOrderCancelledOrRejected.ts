@@ -21,6 +21,12 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
     if (refundStatuses.includes(before.status) || !refundStatuses.includes(after.status)) {
       return;
     }
+    // 防「領獎又退點」：已交付/已完成的訂單即使被改成 cancelled/rejected 也不退款。
+    // 合法取消只發生在 pending/approved 階段（rules 已限制小孩只能在 pending 取消）。
+    if (before.status === 'delivered' || before.status === 'completed') {
+      logger.warn('Order already fulfilled, skipping refund', { orderId: event.data!.after.id, beforeStatus: before.status });
+      return;
+    }
 
     const orderId = event.data!.after.id;
 

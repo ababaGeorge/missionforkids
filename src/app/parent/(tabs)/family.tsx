@@ -63,6 +63,7 @@ export default function FamilyScreen() {
   const [grantAmount, setGrantAmount] = useState('10');
   const [grantReason, setGrantReason] = useState('');
   const [grantMode, setGrantMode] = useState<'give' | 'deduct'>('give');
+  const [granting, setGranting] = useState(false);
   const [manageMember, setManageMember] = useState<MemberRow | null>(null);
 
   useEffect(() => {
@@ -152,9 +153,13 @@ export default function FamilyScreen() {
 
   const handleGrant = async () => {
     if (!uid || !family || !grantTarget) return;
+    if (granting) return; // A9：防連點重複發點
     const raw = parseInt(grantAmount);
     if (!raw || raw <= 0) return;
     const signed = grantMode === 'deduct' ? -raw : raw;
+    // A9：每次發點動作產生一把冪等鍵，網路重試/重送不會重複入帳
+    const idempotencyKey = `${family.id}_${grantTarget.userId}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    setGranting(true);
     try {
       const fn = functions().httpsCallable('grantPoints');
       await fn({
@@ -164,6 +169,7 @@ export default function FamilyScreen() {
         reason:
           grantReason.trim() ||
           (grantMode === 'deduct' ? '爸媽扣點' : '爸媽直接給'),
+        idempotencyKey,
       });
       Alert.alert(
         '',
@@ -176,6 +182,8 @@ export default function FamilyScreen() {
       setGrantTarget(null);
     } catch (e: any) {
       Alert.alert('錯誤', e.message || '失敗');
+    } finally {
+      setGranting(false);
     }
   };
 
@@ -503,14 +511,17 @@ export default function FamilyScreen() {
                   </Pressable>
                   <Pressable
                     onPress={handleGrant}
+                    disabled={granting}
                     style={[
                       modalStyles.save,
                       grantMode === 'deduct' && { backgroundColor: P.accentHot },
+                      granting && { opacity: 0.6 },
                     ]}
                   >
                     <Label style={{ color: P.bg }}>
-                      {grantMode === 'deduct' ? '−' : '+'}
-                      {grantAmount || '0'} ★
+                      {granting
+                        ? '處理中…'
+                        : `${grantMode === 'deduct' ? '−' : '+'}${grantAmount || '0'} ★`}
                     </Label>
                   </Pressable>
                 </View>
