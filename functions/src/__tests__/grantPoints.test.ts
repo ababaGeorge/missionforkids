@@ -7,16 +7,17 @@ afterAll(() => fft.cleanup());
 
 const db = () => admin.firestore();
 
-async function seedParent(uid: string, familyId: string) {
+async function seedParent(uid: string, familyId: string, status = 'active') {
   await db()
     .collection('familyMemberships')
     .doc(`${uid}_${familyId}`)
-    .set({ familyId, userId: uid, role: 'parent', status: 'active' });
+    .set({ familyId, userId: uid, role: 'parent', status });
 }
 async function seedChild(
   uid: string,
   familyId: string,
-  childId?: string
+  childId?: string,
+  status = 'active'
 ) {
   await db()
     .collection('familyMemberships')
@@ -25,7 +26,7 @@ async function seedChild(
       familyId,
       userId: uid,
       role: 'child',
-      status: 'active',
+      status,
       ...(childId !== undefined ? { childId } : {}),
     });
 }
@@ -80,7 +81,7 @@ describe('grantPoints (childId 重構)', () => {
     await seedChild('c4', familyId, 'c4');
     await expect(
       call('not-parent', { childUserId: 'c4', familyId, amount: 10, reason: '' })
-    ).rejects.toThrow(/permission-denied|Only parents/i);
+    ).rejects.toThrow(/permission-denied|Only active parents/i);
   });
 
   it('小孩不是該家庭成員 → not-found / 拋錯，且不寫錢包', async () => {
@@ -100,6 +101,39 @@ describe('grantPoints (childId 重構)', () => {
     await expect(
       call('p6', { childUserId: 'c6', familyId, amount: 1.5, reason: '' })
     ).rejects.toThrow(/invalid-argument|整數/i);
+  });
+
+  it('被移除的家長（status=removed，role 仍 parent）→ permission-denied，不寫錢包', async () => {
+    const familyId = 'fam-removed-parent';
+    await seedParent('ex-parent', familyId, 'removed');
+    await seedChild('c8', familyId, 'c8');
+    await expect(
+      call('ex-parent', { childUserId: 'c8', familyId, amount: 10, reason: '' })
+    ).rejects.toThrow(/permission-denied|active parent/i);
+    const wallets = await db().collection('pointWallets').where('familyId', '==', familyId).get();
+    expect(wallets.size).toBe(0);
+  });
+
+  it('收點對象是被移除的小孩（status=removed）→ 拋錯，不寫錢包', async () => {
+    const familyId = 'fam-removed-child';
+    await seedParent('p9', familyId);
+    await seedChild('removed-kid', familyId, 'removed-kid', 'removed');
+    await expect(
+      call('p9', { childUserId: 'removed-kid', familyId, amount: 10, reason: '' })
+    ).rejects.toThrow(/not-found|active member/i);
+    const wallets = await db().collection('pointWallets').where('familyId', '==', familyId).get();
+    expect(wallets.size).toBe(0);
+  });
+
+  it('收點對象不是小孩（role=parent）→ 拋錯，不寫錢包', async () => {
+    const familyId = 'fam-grant-to-parent';
+    await seedParent('p10', familyId);
+    await seedParent('co-parent', familyId); // 另一位家長被指定為收點對象
+    await expect(
+      call('p10', { childUserId: 'co-parent', familyId, amount: 10, reason: '' })
+    ).rejects.toThrow(/not-found|active member/i);
+    const wallets = await db().collection('pointWallets').where('familyId', '==', familyId).get();
+    expect(wallets.size).toBe(0);
   });
 
   it('不寫任何 auto-id 錢包（doc id 一律 {familyId}_{childId}）', async () => {

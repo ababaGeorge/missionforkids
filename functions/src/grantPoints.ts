@@ -32,13 +32,30 @@ export const grantPoints = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'amount 必須是非零的有限整數');
   }
 
-  // 驗證呼叫者是家長
+  // 驗證呼叫者是「active」家長。被移除的家長 membership 仍在、role 仍是 'parent'，
+  // 必須連 status==='active' 一起驗，否則被踢出家庭的家長還能給/扣點。
   const parentMemberDoc = await db
     .collection('familyMemberships')
     .doc(`${uid}_${familyId}`)
     .get();
-  if (!parentMemberDoc.exists || parentMemberDoc.data()?.role !== 'parent') {
-    throw new HttpsError('permission-denied', 'Only parents can grant points');
+  const parentData = parentMemberDoc.data();
+  if (!parentMemberDoc.exists || parentData?.role !== 'parent' || parentData?.status !== 'active') {
+    throw new HttpsError('permission-denied', 'Only active parents can grant points');
+  }
+
+  // 驗證收點對象是該家庭的 active 小孩：
+  // - 擋發點給「被移除的小孩」（status==='removed'）
+  // - 擋把非 child 成員（如另一位家長）指定為收點對象
+  // 註：這裡多讀一次 membership（resolveAuthoritativeChildId 只回 childId、不回 status/role，
+  //     且它是 onRewardOrderCreated / onTaskInstanceApproved 共用，不宜為此加 status 檢查而
+  //     波及其他路徑），故在本地端顯式驗證。
+  const childMemberDoc = await db
+    .collection('familyMemberships')
+    .doc(`${childUserId}_${familyId}`)
+    .get();
+  const childData = childMemberDoc.data();
+  if (!childMemberDoc.exists || childData?.role !== 'child' || childData?.status !== 'active') {
+    throw new HttpsError('not-found', 'Child is not an active member of this family');
   }
 
   // 解析權威 childId（server 端，不信任 client）。child 不屬該家庭 → 拋錯。
