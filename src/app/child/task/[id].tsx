@@ -132,7 +132,10 @@ export default function ChildTaskDetail() {
     try {
       setSubmitting(true);
       const photoUrl = await uploadPhoto(instance.familyId, photoUri);
-      const subRef = await firestore().collection('taskSubmissions').add({
+      // submission + instance 狀態用同一個 batch 原子寫入，計數用 server-side increment
+      const subRef = firestore().collection('taskSubmissions').doc();
+      const batch = firestore().batch();
+      batch.set(subRef, {
         taskInstanceId: instance.id,
         familyId: instance.familyId,
         submittedBy: uid,
@@ -142,14 +145,12 @@ export default function ChildTaskDetail() {
         aiConfidence: null,
         submittedAt: firestore.FieldValue.serverTimestamp(),
       });
-      await firestore()
-        .collection('taskInstances')
-        .doc(instance.id)
-        .update({
-          status: 'submitted',
-          submissionCount: (instance.submissionCount || 0) + 1,
-          submittedAt: firestore.FieldValue.serverTimestamp(),
-        });
+      batch.update(firestore().collection('taskInstances').doc(instance.id), {
+        status: 'submitted',
+        submissionCount: firestore.FieldValue.increment(1),
+        submittedAt: firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
       setPhotoUri(null);
       setNote('');
       // B1：AI 小幫手看照片給鼓勵（非阻斷；CF 會把判斷寫回 submission 供家長參考）。
@@ -182,7 +183,8 @@ export default function ChildTaskDetail() {
     }
     try {
       setSubmitting(true);
-      await firestore().collection('taskSubmissions').add({
+      const batch = firestore().batch();
+      batch.set(firestore().collection('taskSubmissions').doc(), {
         taskInstanceId: instance.id,
         familyId: instance.familyId,
         submittedBy: uid,
@@ -192,14 +194,12 @@ export default function ChildTaskDetail() {
         aiConfidence: null,
         submittedAt: firestore.FieldValue.serverTimestamp(),
       });
-      await firestore()
-        .collection('taskInstances')
-        .doc(instance.id)
-        .update({
-          status: 'submitted',
-          submissionCount: (instance.submissionCount || 0) + 1,
-          submittedAt: firestore.FieldValue.serverTimestamp(),
-        });
+      batch.update(firestore().collection('taskInstances').doc(instance.id), {
+        status: 'submitted',
+        submissionCount: firestore.FieldValue.increment(1),
+        submittedAt: firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
       setPhotoUri(null);
       setNote('');
     } catch (e: any) {
@@ -417,7 +417,7 @@ export default function ChildTaskDetail() {
               </>
             )}
           </Pressable>
-          {canSubmit && (
+          {__DEV__ && canSubmit && (
             <Pressable
               onPress={handleDevSubmitNoPhoto}
               disabled={submitting}
