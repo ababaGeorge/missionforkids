@@ -46,6 +46,13 @@ export function useFamily(userId: string | undefined) {
         }
 
         setLoading(false);
+      }, (err: any) => {
+        // 查詢失敗（如 permission-denied / 缺索引）不能無聲卡在 loading
+        console.error('[useFamily] membership listener error:', err?.code ?? err);
+        setFamily(null);
+        setMembership(null);
+        setMembers([]);
+        setLoading(false);
       });
 
     return unsubMembership;
@@ -71,6 +78,9 @@ export function useFamily(userId: string | undefined) {
             (doc) => ({ id: doc.id, ...doc.data() } as FamilyMembership)
           )
         );
+      }, (err: any) => {
+        console.error('[useFamily] members listener error:', err?.code ?? err);
+        setMembers([]);
       });
 
     return unsubMembers;
