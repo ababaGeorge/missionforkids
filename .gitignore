@@ -33,6 +33,10 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Firebase Functions local secrets（functions:secrets 產生，含 prod 金鑰，絕不進 git）
+.secret.local
+*.secret.local
+
 # typescript
 *.tsbuildinfo
 
