@@ -1,5 +1,6 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
 export const acceptFamilyInvite = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -12,7 +13,7 @@ export const acceptFamilyInvite = onCall(async (request) => {
   }
   const email = (request.auth?.token?.email as string | undefined) ?? null;
   const db = admin.firestore();
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
 
   return db.runTransaction(async (tx) => {
     const inviteRef = db.collection('familyInvites').doc(inviteId);
@@ -34,7 +35,7 @@ export const acceptFamilyInvite = onCall(async (request) => {
     if (invite.status !== 'pending') {
       throw new HttpsError('failed-precondition', 'INVITE_ALREADY_USED');
     }
-    if ((invite.expiresAt as admin.firestore.Timestamp).toDate() < new Date()) {
+    if ((invite.expiresAt as Timestamp).toDate() < new Date()) {
       throw new HttpsError('failed-precondition', 'INVITE_EXPIRED');
     }
 

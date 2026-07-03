@@ -1,6 +1,7 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
 import { isValidPointsValue } from './lib/points';
 
@@ -94,12 +95,12 @@ export const onTaskInstanceApproved = onDocumentUpdated(
           userId,
           familyId,
           balance: points,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       } else {
         tx.update(wallet.ref, {
-          balance: admin.firestore.FieldValue.increment(points),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          balance: FieldValue.increment(points),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       }
 
@@ -111,7 +112,7 @@ export const onTaskInstanceApproved = onDocumentUpdated(
         sourceId: instanceId,
         createdBy: null,
         note: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
 
       tx.update(instanceRef, { pointsAwarded: points });

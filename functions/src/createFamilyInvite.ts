@@ -2,6 +2,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import { defineSecret } from 'firebase-functions/params';
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { sendInviteEmail } from './lib/sendInviteEmail';
 
 const resendApiKey = defineSecret('RESEND_API_KEY');
@@ -39,8 +40,8 @@ export const createFamilyInvite = onCall(
     const famSnap = await db.collection('families').doc(familyId).get();
     const familyName = (famSnap.data()?.displayName as string) || '家庭';
 
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const expiresAt = admin.firestore.Timestamp.fromMillis(
+    const now = FieldValue.serverTimestamp();
+    const expiresAt = Timestamp.fromMillis(
       Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000
     );
 

@@ -1,6 +1,7 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
 const db = admin.firestore;
 
@@ -10,7 +11,7 @@ const db = admin.firestore;
 export const autoCompleteDeliveredOrders = onSchedule(
   'every 1 hours',
   async () => {
-    const now = admin.firestore.Timestamp.now();
+    const now = Timestamp.now();
 
     const expiredOrders = await db()
       .collection('rewardOrders')
@@ -29,7 +30,7 @@ export const autoCompleteDeliveredOrders = onSchedule(
     expiredOrders.forEach((doc) => {
       batch.update(doc.ref, {
         status: 'completed',
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: FieldValue.serverTimestamp(),
       });
       count++;
     });
