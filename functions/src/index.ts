@@ -6,6 +6,7 @@ export { onTaskInstanceApproved } from './onTaskInstanceApproved';
 export { onRewardOrderCreated } from './onRewardOrderCreated';
 export { onRewardOrderCancelledOrRejected } from './onRewardOrderCancelledOrRejected';
 export { autoCompleteDeliveredOrders } from './autoCompleteDeliveredOrders';
+export { rolloverRecurringTasksScheduled } from './rolloverRecurringTasks';
 export { analyzePhoto } from './analyzePhoto';
 export { grantPoints } from './grantPoints';
 export { bootstrapParentAccount } from './bootstrapParentAccount';
