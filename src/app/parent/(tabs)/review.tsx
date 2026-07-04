@@ -105,9 +105,12 @@ export default function ParentReview() {
   const [reviewOrders, setReviewOrders] = useState<ReviewOrder[]>([]);
   const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
   const [activeOrder, setActiveOrder] = useState<ReviewOrder | null>(null);
+  // B10：孩子提議的任務（status='proposed'）
+  const [proposals, setProposals] = useState<{ id: string; title: string; points: number; createdBy: string; childName: string }[]>([]);
   // 世代守衛：async 組裝期間新快照到達時，丟棄較慢的舊結果，避免審完的卡片重新冒出來。
   const taskGen = useRef(0);
   const orderGen = useRef(0);
+  const proposalGen = useRef(0);
 
   useEffect(() => {
     if (!family) return;
@@ -202,7 +205,99 @@ export default function ParentReview() {
     return unsub;
   }, [family?.id]);
 
-  const total = reviewTasks.length + reviewOrders.length;
+  // B10：孩子提議的任務
+  useEffect(() => {
+    if (!family) return;
+    const unsub = firestore()
+      .collection('tasks')
+      .where('familyId', '==', family.id)
+      .where('status', '==', 'proposed')
+      .onSnapshot(async (snap) => {
+        if (!snap) return;
+        const gen = ++proposalGen.current;
+        const list: { id: string; title: string; points: number; createdBy: string; childName: string }[] = [];
+        for (const doc of snap.docs) {
+          try {
+            const t = doc.data();
+            const { name } = await resolveMemberDisplay(family.id, t.createdBy, '小朋友');
+            list.push({
+              id: doc.id,
+              title: t.title ?? '任務',
+              points: t.points ?? 0,
+              createdBy: t.createdBy,
+              childName: name,
+            });
+          } catch (e) {
+            console.warn('[Review] proposal skip', doc.id, (e as any)?.code);
+          }
+        }
+        if (gen !== proposalGen.current) return;
+        setProposals(list);
+      }, (err) => console.error('[Review] proposal snapshot error:', (err as any)?.code));
+    return unsub;
+  }, [family?.id]);
+
+  const approveProposal = async (p: { id: string; createdBy: string }) => {
+    if (!family) return;
+    try {
+      // 解析提議小孩的 childId（點數釘 childId；現行資料 childId == uid，取 membership 為準）
+      const memSnap = await firestore()
+        .collection('familyMemberships')
+        .doc(`${p.createdBy}_${family.id}`)
+        .get();
+      const childId = memSnap.data()?.childId ?? p.createdBy;
+      const now = firestore.Timestamp.now();
+      const dueDate = firestore.Timestamp.fromDate(
+        new Date(Date.now() + 24 * 60 * 60 * 1000)
+      );
+      const graceEnd = firestore.Timestamp.fromDate(
+        new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+      );
+      const batch = firestore().batch();
+      batch.update(firestore().collection('tasks').doc(p.id), {
+        status: 'active',
+        startDate: now,
+        dueDate,
+        graceDays: 2,
+      });
+      batch.set(firestore().collection('taskInstances').doc(), {
+        taskId: p.id,
+        userId: p.createdBy,
+        childId,
+        familyId: family.id,
+        periodStart: now,
+        periodEnd: dueDate,
+        gracePeriodEnd: graceEnd,
+        status: 'pending',
+        submissionCount: 0,
+        reviewedBy: null,
+        reviewedAt: null,
+        pointsAwarded: null,
+      });
+      await batch.commit();
+    } catch (e: any) {
+      Alert.alert('同意失敗', e?.message || '不明錯誤');
+    }
+  };
+
+  const rejectProposal = (p: { id: string }) => {
+    Alert.alert('婉拒提議', '確定不採用這個任務提議？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '婉拒',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await firestore().collection('tasks').doc(p.id).update({ status: 'archived' });
+          } catch (e: any) {
+            Alert.alert('操作失敗', e?.message || '不明錯誤');
+          }
+        },
+      },
+    ]);
+  };
+
+  const total = reviewTasks.length + reviewOrders.length + proposals.length;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -217,6 +312,38 @@ export default function ParentReview() {
             {total === 0 ? '都審完了 🎉' : `${total} 個等你看`}
           </Display>
         </View>
+
+        {proposals.length > 0 && (
+          <View style={styles.section}>
+            <Label color={P.muted} style={{ marginBottom: spacing.sm }}>
+              孩子的提議
+            </Label>
+            {proposals.map((p) => (
+              <View key={p.id} style={styles.orderCard}>
+                <View style={styles.orderIcon}>
+                  <Body style={{ fontSize: 24 }}>✎</Body>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Label style={{ color: '#8A8275' }}>{p.childName} 想做</Label>
+                  <H3 style={{ fontSize: 15, marginTop: 2, color: '#1C1A14' }}>
+                    {p.title}
+                  </H3>
+                  <Data style={{ fontSize: 13, marginTop: 4, color: '#1C1A14', fontWeight: '700' }}>
+                    ★ {p.points}
+                  </Data>
+                </View>
+                <View style={{ gap: 6 }}>
+                  <Pressable onPress={() => approveProposal(p)} style={styles.proposalApprove}>
+                    <Label style={{ color: P.bg, fontSize: 12, fontWeight: '800' }}>同意</Label>
+                  </Pressable>
+                  <Pressable onPress={() => rejectProposal(p)} style={styles.proposalReject}>
+                    <Label style={{ color: P.muted, fontSize: 12 }}>婉拒</Label>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {reviewOrders.length > 0 && (
           <View style={styles.section}>
@@ -821,6 +948,21 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  proposalApprove: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    alignItems: 'center',
+  },
+  proposalReject: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
   },
 });
 

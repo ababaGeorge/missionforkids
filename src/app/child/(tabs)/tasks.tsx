@@ -5,6 +5,11 @@ import {
   Text,
   StyleSheet,
   Pressable,
+  Modal,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -66,6 +71,11 @@ export default function ChildTasks() {
   const [items, setItems] = useState<TaskWithInstance[]>([]);
   const [wallet, setWallet] = useState<PointWallet | null>(null);
   const [celebration, setCelebration] = useState<{ points: number } | null>(null);
+  // B10：孩子提議任務
+  const [showPropose, setShowPropose] = useState(false);
+  const [proposeTitle, setProposeTitle] = useState('');
+  const [proposePoints, setProposePoints] = useState('20');
+  const [proposing, setProposing] = useState(false);
   const prevStatuses = useRef<Record<string, string>>({});
   const snapshotGen = useRef(0);
 
@@ -192,6 +202,33 @@ export default function ChildTasks() {
   const kidName = user?.displayName || '你';
   const balance = wallet?.balance || 0;
 
+  const submitProposal = async () => {
+    if (!uid || !familyId || !proposeTitle.trim() || proposing) return;
+    setProposing(true);
+    try {
+      await firestore().collection('tasks').add({
+        familyId,
+        title: proposeTitle.trim(),
+        points: Math.max(1, parseInt(proposePoints) || 20),
+        frequency: 'once',
+        status: 'proposed', // 家長核准後才變 active（rules 只放行小孩建 proposed）
+        createdBy: uid,
+        assigneeType: 'individual',
+        assigneeUserId: uid,
+        reviewMode: 'manual',
+        createdAt: firestore.FieldValue.serverTimestamp(),
+      });
+      setShowPropose(false);
+      setProposeTitle('');
+      setProposePoints('20');
+      Alert.alert('已送出 ✦', '等爸媽同意，同意後就會出現在你的任務裡。');
+    } catch (e: any) {
+      Alert.alert('送出失敗', e?.message || '再試一次');
+    } finally {
+      setProposing(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <Starfield count={22} />
@@ -273,6 +310,69 @@ export default function ChildTasks() {
           </View>
         )}
       </ScrollView>
+
+      {/* B10：提議任務入口 */}
+      <Pressable
+        onPress={() => setShowPropose(true)}
+        style={styles.proposeFab}
+        hitSlop={10}
+      >
+        <Text style={{ fontSize: 20 }}>✎</Text>
+        <Label style={{ color: P.bg, fontSize: 12, marginLeft: 6, fontWeight: '800' }}>
+          提議任務
+        </Label>
+      </Pressable>
+
+      <Modal visible={showPropose} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.proposeOverlay}>
+            <View style={styles.proposeSheet}>
+              <H3 style={{ marginBottom: 4 }}>想做什麼任務？</H3>
+              <BodySm color={P.muted} style={{ marginBottom: spacing.md }}>
+                告訴爸媽你想做的任務，他們同意後就能開始賺星光。
+              </BodySm>
+              <TextInput
+                style={styles.proposeInput}
+                placeholder="任務名稱（例如：幫忙洗碗）"
+                placeholderTextColor={P.muted}
+                value={proposeTitle}
+                onChangeText={setProposeTitle}
+              />
+              <TextInput
+                style={styles.proposeInput}
+                placeholder="想要幾顆星（爸媽可調整）"
+                placeholderTextColor={P.muted}
+                value={proposePoints}
+                onChangeText={(t) => setProposePoints(t.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+              />
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: spacing.md }}>
+                <Pressable
+                  onPress={() => setShowPropose(false)}
+                  style={styles.proposeCancel}
+                >
+                  <Label style={{ color: P.muted }}>取消</Label>
+                </Pressable>
+                <Pressable
+                  onPress={submitProposal}
+                  disabled={!proposeTitle.trim() || proposing}
+                  style={[
+                    styles.proposeSubmit,
+                    (!proposeTitle.trim() || proposing) && { opacity: 0.5 },
+                  ]}
+                >
+                  <Label style={{ color: P.bg, fontWeight: '800' }}>
+                    {proposing ? '送出中…' : '送給爸媽'}
+                  </Label>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {celebration && (
         <CelebrationOverlay
@@ -546,5 +646,60 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: spacing.sm,
     flexShrink: 0,
+  },
+  proposeFab: {
+    position: 'absolute',
+    right: 18,
+    bottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: P.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: radius.full,
+    shadowColor: P.primary,
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  proposeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  proposeSheet: {
+    backgroundColor: P.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: P.border,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  proposeInput: {
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: P.border,
+    backgroundColor: P.bg,
+    color: P.text,
+    fontSize: 15,
+    marginBottom: 12,
+  },
+  proposeCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+  },
+  proposeSubmit: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    alignItems: 'center',
   },
 });

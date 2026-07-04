@@ -446,6 +446,38 @@ async function main() {
     if (snap.size !== 1) throw new Error(`家長 active parent membership 有 ${snap.size} 筆`);
   });
 
+  // ========== 14. B10：孩子提議任務 → 家長核准 ==========
+  let proposedTaskId;
+  await step('14.1 小孩建「提議中」任務（rules 放行）', async () => {
+    const ref = await addDoc(collection(C.db, 'tasks'), {
+      familyId, title: '幫忙洗車', points: 30, frequency: 'once',
+      status: 'proposed', createdBy: kidUid,
+      assigneeType: 'individual', assigneeUserId: kidUid,
+      reviewMode: 'manual', createdAt: serverTimestamp(),
+    });
+    proposedTaskId = ref.id;
+  });
+  await expectDenied('14.2 小孩不能把提議自我啟用成 active', () =>
+    updateDoc(doc(C.db, 'tasks', proposedTaskId), { status: 'active' }));
+  await step('14.3 家長核准提議（→active）+ 建 instance', async () => {
+    const now = Timestamp.now();
+    const dueDate = Timestamp.fromMillis(Date.now() + 24 * 3600 * 1000);
+    await updateDoc(doc(P.db, 'tasks', proposedTaskId), { status: 'active' });
+    await addDoc(collection(P.db, 'taskInstances'), {
+      taskId: proposedTaskId, userId: kidUid, childId, familyId,
+      periodStart: now, periodEnd: dueDate, gracePeriodEnd: dueDate,
+      status: 'pending', submissionCount: 0,
+      reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+    });
+  });
+  await step('14.4 小孩任務列表看得到核准後的提議任務', async () => {
+    const snap = await getDocs(query(collection(C.db, 'taskInstances'),
+      where('childId', '==', childId), where('familyId', '==', familyId),
+      where('status', 'in', ['pending', 'submitted', 'approved', 'rejected'])));
+    const has = snap.docs.some((d) => d.data().taskId === proposedTaskId);
+    if (!has) throw new Error('核准後的提議任務 instance 未出現在小孩清單');
+  });
+
   // ---- 報告 ----
   console.log('\n================ 核心迴圈 E2E 實測結果 ================');
   for (const r of results) {

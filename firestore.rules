@@ -95,8 +95,15 @@ service cloud.firestore {
     // ========== Tasks ==========
     match /tasks/{taskId} {
       allow read: if isFamilyMember(resource.data.familyId);
-      // 只有該家庭家長能建任務（擋跨家庭注入 A11、擋小孩自建任務閉環 A1）
-      allow create: if isFamilyParent(request.resource.data.familyId);
+      // 家長可直接建任務；小孩只能建「提議中」任務（B10）。
+      // 提議任務無 instance（建 instance 仍限家長），且 status 流轉仍限家長，
+      // 故不重開 A1（小孩自建任務閉環自我發點）—— 點數必須家長核准提議→建 instance→核准提交才發。
+      allow create: if isFamilyParent(request.resource.data.familyId)
+        || (
+          isFamilyMember(request.resource.data.familyId)
+          && request.resource.data.status == 'proposed'
+          && request.resource.data.createdBy == request.auth.uid
+        );
       allow update: if isFamilyParent(resource.data.familyId)
         && request.resource.data.familyId == resource.data.familyId;
       allow delete: if isFamilyParent(resource.data.familyId);
