@@ -43,6 +43,9 @@ yarn-error.*
 # Cloud Functions compiled output
 functions/lib/
 
+# 安全 demo 截圖（本機證據，太大不進 repo）
+.gstack/demo/
+
 # generated native folders
 /ios
 /android
