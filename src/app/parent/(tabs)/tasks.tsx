@@ -87,7 +87,13 @@ type TaskWithInstances = { task: Task; instances: TaskInstance[] };
 export default function ParentTasks() {
   const uid = auth().currentUser?.uid;
   const [tab, setTab] = useState<'manage' | 'history'>('manage');
-  const [tasks, setTasks] = useState<TaskWithInstances[]>([]);
+  const [taskDocs, setTaskDocs] = useState<Task[]>([]);
+  // 全家庭 taskInstances 即時訂閱，依 taskId 分組。小孩提交/家長核准會即時反映在進度與歷程。
+  const [instByTask, setInstByTask] = useState<Record<string, TaskInstance[]>>({});
+  const tasks = useMemo<TaskWithInstances[]>(
+    () => taskDocs.map((task) => ({ task, instances: instByTask[task.id] ?? [] })),
+    [taskDocs, instByTask]
+  );
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [children, setChildren] = useState<{ id: string; name: string; childId: string }[]>([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -112,26 +118,34 @@ export default function ParentTasks() {
     if (!familyId) return;
     const unsub = firestore()
       .collection('tasks')
+      // 納入 archived：否則封存任務的完成/退回歷史會從「歷程」瞬間消失。
+      // manage 清單再過濾回 active 顯示。索引 (familyId, status, createdAt) 支援 in 查詢。
       .where('familyId', '==', familyId)
-      .where('status', '==', 'active')
+      .where('status', 'in', ['active', 'archived'])
       .orderBy('createdAt', 'desc')
-      .onSnapshot(async (snap) => {
+      .onSnapshot((snap) => {
         if (!snap) return;
-        const list: TaskWithInstances[] = [];
-        for (const doc of snap.docs) {
-          const task = { id: doc.id, ...doc.data() } as Task;
-          const instSnap = await firestore()
-            .collection('taskInstances')
-            .where('taskId', '==', task.id)
-            .where('familyId', '==', familyId)
-            .get();
-          const instances = instSnap.docs.map(
-            (d) => ({ id: d.id, ...d.data() } as TaskInstance)
-          );
-          list.push({ task, instances });
-        }
-        setTasks(list);
+        setTaskDocs(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Task)));
       }, (err) => console.error('[ParentTasks] tasks error:', (err as any)?.code));
+    return unsub;
+  }, [familyId]);
+
+  // 全家庭 taskInstances 即時訂閱：小孩提交、家長核准後，進度條與歷程 tab 即時更新
+  // （原本 instances 是一次性 get()，任務清單不變時不會重抓）。
+  useEffect(() => {
+    if (!familyId) return;
+    const unsub = firestore()
+      .collection('taskInstances')
+      .where('familyId', '==', familyId)
+      .onSnapshot((snap) => {
+        if (!snap) return;
+        const grouped: Record<string, TaskInstance[]> = {};
+        for (const d of snap.docs) {
+          const inst = { id: d.id, ...d.data() } as TaskInstance;
+          (grouped[inst.taskId] ??= []).push(inst);
+        }
+        setInstByTask(grouped);
+      }, (err) => console.error('[ParentTasks] instances error:', (err as any)?.code));
     return unsub;
   }, [familyId]);
 
@@ -164,9 +178,11 @@ export default function ParentTasks() {
     return unsub;
   }, [familyId]);
 
+  // manage 分頁只顯示 active 任務（tasks 現在含 archived，供歷程用）。
   const filteredTasks = useMemo(() => {
-    if (!filterChild) return tasks;
-    return tasks.filter((tw) =>
+    const active = tasks.filter((tw) => tw.task.status === 'active');
+    if (!filterChild) return active;
+    return active.filter((tw) =>
       tw.instances.some((i) => i.userId === filterChild)
     );
   }, [tasks, filterChild]);
@@ -231,7 +247,7 @@ export default function ParentTasks() {
         <View style={styles.header}>
           <Label color={P.muted}>任務</Label>
           <Display style={{ marginTop: 2 }}>
-            {tab === 'manage' ? `${activeCount} 個任務在跑` : '過去 7 天'}
+            {tab === 'manage' ? `${activeCount} 個任務在跑` : '完成歷程'}
           </Display>
 
           <View style={styles.segment}>
@@ -265,7 +281,7 @@ export default function ParentTasks() {
               style={[styles.filterPill, !filterChild && styles.filterPillOn]}
             >
               <Label style={[styles.filterPillLabel, !filterChild && styles.filterPillLabelOn]}>
-                全部 · {tasks.length}
+                全部 · {tasks.filter((tw) => tw.task.status === 'active').length}
               </Label>
             </Pressable>
             {children.map((c) => (
@@ -430,7 +446,10 @@ export default function ParentTasks() {
                         fontWeight: '700',
                       }}
                     >
-                      ★ {task.points}
+                      {/* 已核准顯示實際發出的點數（pointsAwarded），改任務現值不影響歷史 */}
+                      ★ {instance.status === 'approved'
+                        ? instance.pointsAwarded ?? task.points
+                        : task.points}
                     </Data>
                   </View>
                 ))
@@ -492,6 +511,7 @@ function CreateTaskModal({
   // assignee userId → 永久 childId（點數釘 childId）；找不到退回 userId
   const childIdOf = (assigneeUserId: string) =>
     children.find((c) => c.id === assigneeUserId)?.childId ?? assigneeUserId;
+  const [saving, setSaving] = useState(false); // 防連點：多筆網路寫入期間鎖住送出
   const [form, setForm] = useState({
     title: '',
     points: '10',
@@ -616,6 +636,7 @@ function CreateTaskModal({
 
   const handleCreate = async () => {
     if (!familyId || !uid || !form.title.trim()) return;
+    if (saving) return; // 防連點：避免重複建立任務與重複 instances
     const assignees =
       form.selectedChildren.length > 0
         ? form.selectedChildren
@@ -626,17 +647,23 @@ function CreateTaskModal({
       Alert.alert('錯誤', '請先新增孩子到家庭');
       return;
     }
+    setSaving(true);
     try {
       const now = firestore.Timestamp.now();
-      const periodEnd = getPeriodEnd();
-      const dueDate = firestore.Timestamp.fromDate(periodEnd);
       const graceDays = parseInt(form.graceDays) || 2;
-      const gracePeriodEnd = firestore.Timestamp.fromDate(
-        new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
-      );
 
       if (editing) {
-        // 編輯模式：更新 task 欄位 + 對帳 instances（加/移除指派的孩子）
+        // 編輯模式：只有「頻率改變」時才重算截止日，否則保留既有 dueDate——
+        // 避免每次只改標題也把截止日往後漂移。
+        const freqChanged = editing.task.frequency !== form.frequency;
+        const dueDate: any = freqChanged
+          ? firestore.Timestamp.fromDate(getPeriodEnd())
+          : editing.task.dueDate;
+        const gracePeriodEnd = firestore.Timestamp.fromDate(
+          new Date(dueDate.toDate().getTime() + graceDays * 24 * 60 * 60 * 1000)
+        );
+
+        // 更新 task 欄位 + 對帳 instances（加/移除指派的孩子）
         await firestore().collection('tasks').doc(editing.task.id).update({
           title: form.title.trim(),
           points: parseInt(form.points) || 10,
@@ -650,9 +677,11 @@ function CreateTaskModal({
         const existingByUser = new Map(
           editing.instances.map((i) => [i.userId, i])
         );
-        // 新增的孩子 → 建新 pending instance
+        const inProgress = ['pending', 'submitted', 'rejected'];
         for (const childId of assignees) {
-          if (!existingByUser.has(childId)) {
+          const existing = existingByUser.get(childId);
+          if (!existing) {
+            // 全新指派的孩子 → 建新 pending instance
             await firestore().collection('taskInstances').add({
               taskId: editing.task.id,
               userId: childId,
@@ -667,11 +696,31 @@ function CreateTaskModal({
               reviewedAt: null,
               pointsAwarded: null,
             });
+          } else if (existing.status === 'missed') {
+            // 之前被移除（missed）的孩子重新加回 → 復活成 pending，重設本期期限與計數，
+            // 否則會永遠卡在 missed、小孩看不到任務。
+            await firestore().collection('taskInstances').doc(existing.id).update({
+              status: 'pending',
+              periodStart: now,
+              periodEnd: dueDate,
+              gracePeriodEnd,
+              submissionCount: 0,
+              reviewedBy: null,
+              reviewedAt: null,
+              pointsAwarded: null,
+            });
+          } else if (freqChanged && inProgress.includes(existing.status)) {
+            // 頻率/期限改變 → 同步既有「進行中」instance 的期限（不動已核准的歷史）。
+            await firestore().collection('taskInstances').doc(existing.id).update({
+              periodEnd: dueDate,
+              gracePeriodEnd,
+            });
           }
         }
-        // 被移除的孩子 → instance 標 missed（保留歷史，不刪）
+        // 被移除的孩子 → 只把「進行中」的 instance 標 missed；
+        // 已核准/已錯過的保持原狀（approved 是點數帳本的歷史，覆寫會毀掉紀錄）。
         for (const inst of editing.instances) {
-          if (!assignees.includes(inst.userId) && inst.status !== 'missed') {
+          if (!assignees.includes(inst.userId) && inProgress.includes(inst.status)) {
             await firestore()
               .collection('taskInstances')
               .doc(inst.id)
@@ -681,6 +730,12 @@ function CreateTaskModal({
         onClose();
         return;
       }
+
+      const periodEnd = getPeriodEnd();
+      const dueDate = firestore.Timestamp.fromDate(periodEnd);
+      const gracePeriodEnd = firestore.Timestamp.fromDate(
+        new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
+      );
 
       const taskRef = await firestore().collection('tasks').add({
         familyId,
@@ -727,6 +782,8 @@ function CreateTaskModal({
       onClose();
     } catch (e: any) {
       Alert.alert(editing ? '儲存失敗' : '建立失敗', e?.message || '不明錯誤');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -985,13 +1042,15 @@ function CreateTaskModal({
                   </Pressable>
                   <Pressable
                     onPress={handleCreate}
-                    disabled={!form.title.trim()}
+                    disabled={!form.title.trim() || saving}
                     style={[
                       modalStyles.saveBtn,
-                      !form.title.trim() && { opacity: 0.5 },
+                      (!form.title.trim() || saving) && { opacity: 0.5 },
                     ]}
                   >
-                    <Label style={{ color: P.bg }}>{editing ? '儲存' : '建立'}</Label>
+                    <Label style={{ color: P.bg }}>
+                      {saving ? '處理中…' : editing ? '儲存' : '建立'}
+                    </Label>
                   </Pressable>
                 </View>
               </ScrollView>

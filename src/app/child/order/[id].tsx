@@ -66,7 +66,7 @@ export default function ChildOrderDetail() {
           const iData = itemDoc.data();
           if (iData) setItem({ id: itemDoc.id, ...iData } as RewardItem);
         }
-      });
+      }, (err) => console.error('[ChildOrder] snapshot error:', (err as any)?.code));
     return unsub;
   }, [orderId]);
 
@@ -85,6 +85,8 @@ export default function ChildOrderDetail() {
       });
     } catch {
       Alert.alert('出錯了', '再試一次。');
+    } finally {
+      // 不論成功失敗都要解除 submitting，否則成功後兩顆 footer 按鈕永久 disabled。
       setSubmitting(false);
     }
   };

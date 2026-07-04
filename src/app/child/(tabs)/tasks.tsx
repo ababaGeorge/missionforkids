@@ -121,17 +121,26 @@ export default function ChildTasks() {
               .doc(instance.taskId)
               .get();
             const taskData = taskDoc.data();
-            if (taskData) {
+            // 家長刪除任務是 soft delete（status='archived'）。archived 的任務不該再出現在
+            // 小孩清單、也不該能再提交——過濾掉，避免「刪了還看得到、還能交、還發點」。
+            if (taskData && taskData.status !== 'archived') {
               next.push({
                 task: { id: taskDoc.id, ...taskData } as Task & { emoji?: string },
                 instance,
               });
             }
+            // 慶祝動畫：只在「核准且 CF 已把 pointsAwarded 寫入」時觸發，否則會閃「+0」
+            // （狀態先翻 approved、pointsAwarded 由 trigger 稍後才補）。
             const prev = prevStatuses.current[doc.id];
-            if (prev && prev !== 'approved' && instance.status === 'approved') {
-              setCelebration({ points: instance.pointsAwarded || 0 });
+            const approvedWithPoints =
+              instance.status === 'approved' && instance.pointsAwarded != null;
+            if (prev && prev !== 'approved' && approvedWithPoints) {
+              setCelebration({ points: instance.pointsAwarded as number });
             }
-            prevStatuses.current[doc.id] = instance.status;
+            // pointsAwarded 未到位前不把 prev 推進成 approved，確保下次補到時仍算「轉換」。
+            if (approvedWithPoints) prevStatuses.current[doc.id] = 'approved';
+            else if (instance.status !== 'approved')
+              prevStatuses.current[doc.id] = instance.status;
           } catch (e) {
             console.warn('[ChildTasks] skipping instance', doc.id, (e as any)?.code);
           }

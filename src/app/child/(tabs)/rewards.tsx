@@ -101,7 +101,6 @@ export default function ChildRewards() {
       .collection('rewardOrders')
       .where('childId', '==', childId)
       .where('familyId', '==', familyId)
-      .limit(20)
       .onSnapshot((snap) => {
         if (!snap) return;
         const list = snap.docs.map(
@@ -112,7 +111,6 @@ export default function ChildRewards() {
           const bt = (b as any).createdAt?.toMillis?.() || 0;
           return bt - at;
         });
-        console.log('[ChildRewards] orders fetched:', list.map((o) => ({ id: o.id, status: o.status, itemId: o.itemId })));
         setOrders(list);
       }, (err) => console.warn('[ChildRewards] orders error:', (err as any)?.code));
     return unsub;
@@ -130,9 +128,31 @@ export default function ChildRewards() {
     return { activeOrder: active, history: hist };
   }, [orders]);
 
-  const activeItem = activeOrder
+  // 進行中訂單的品項：先找 active 清單；若品項已被家長封存（不在 active 清單），
+  // 直接抓該品項 doc 作 fallback，否則橫幅會消失、shop 被鎖，小孩無法進入取消進行中訂單。
+  const activeItemInList = activeOrder
     ? items.find((i) => i.id === activeOrder.itemId)
     : undefined;
+  const [archivedItem, setArchivedItem] = useState<RewardItem | null>(null);
+  useEffect(() => {
+    if (!activeOrder || activeItemInList) {
+      setArchivedItem(null);
+      return;
+    }
+    let alive = true;
+    firestore()
+      .collection('rewardItems')
+      .doc(activeOrder.itemId)
+      .get()
+      .then((d) => {
+        if (alive && d.exists()) setArchivedItem({ id: d.id, ...d.data() } as RewardItem);
+      })
+      .catch((e) => console.warn('[ChildRewards] archived item fetch', (e as any)?.code));
+    return () => {
+      alive = false;
+    };
+  }, [activeOrder?.itemId, activeItemInList]);
+  const activeItem = activeItemInList ?? archivedItem ?? undefined;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

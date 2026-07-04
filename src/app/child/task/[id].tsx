@@ -82,15 +82,26 @@ export default function ChildTaskDetail() {
         const inst = { id: snap.id, ...data } as InstanceDoc;
         setInstance(inst);
         if (!task || task.id !== inst.taskId) {
-          const taskDoc = await firestore()
-            .collection('tasks')
-            .doc(inst.taskId)
-            .get();
-          const tData = taskDoc.data();
-          if (tData) {
-            setTask({ id: taskDoc.id, ...tData } as Task & { emoji?: string });
+          try {
+            const taskDoc = await firestore()
+              .collection('tasks')
+              .doc(inst.taskId)
+              .get();
+            const tData = taskDoc.data();
+            if (tData) {
+              setTask({ id: taskDoc.id, ...tData } as Task & { emoji?: string });
+            } else {
+              setNotFound(true); // task 被刪/讀不到 → 顯示可退出畫面，不卡轉圈
+            }
+          } catch (e) {
+            console.warn('[ChildTask] task load error', (e as any)?.code);
+            setNotFound(true);
           }
         }
+      }, (err) => {
+        // 讀取被拒/網路錯誤：導向 notFound 畫面（有「回上一頁」出口），不永久卡 loading。
+        console.error('[ChildTask] snapshot error:', (err as any)?.code);
+        setNotFound(true);
       });
     return unsub;
   }, [instanceId]);

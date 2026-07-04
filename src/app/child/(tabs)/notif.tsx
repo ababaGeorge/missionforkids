@@ -69,7 +69,6 @@ export default function ChildNotif() {
       .where('childId', '==', childId)
       .where('familyId', '==', familyId)
       .where('status', 'in', ['approved', 'rejected'])
-      .limit(20)
       .onSnapshot(async (snap) => {
         if (!snap) return;
         const gen = ++snapshotGen.current;

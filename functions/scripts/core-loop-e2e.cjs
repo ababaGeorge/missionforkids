@@ -417,6 +417,35 @@ async function main() {
     if (snap.size !== 2) throw new Error(`預期 2 名成員，拿到 ${snap.size}`);
   });
 
+  // ========== 12. 修正驗證：重複接受第二張同 email 邀請不歸零錢包 ==========
+  let invite2Id;
+  await step('12.1 家長對同一小孩 email 再發一張邀請', async () => {
+    const fn = httpsCallable(P.fns, 'createFamilyInvite');
+    const res = await fn({ familyId, email: kidEmail, childName: '小安' });
+    invite2Id = res.data.inviteId;
+  });
+  await step('12.2 小孩接受第二張邀請（已是成員、錢包有 20 點）', async () => {
+    const fn = httpsCallable(C.fns, 'acceptFamilyInvite');
+    const res = await fn({ inviteId: invite2Id });
+    if (res.data.familyId !== familyId) throw new Error('familyId 不符');
+  });
+  await step('12.3 錢包餘額仍為 20（未被 acceptFamilyInvite 覆寫歸零）', async () => {
+    const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
+    if (w.data().balance !== 20) throw new Error(`餘額 ${w.data().balance} != 20（回歸：錢包被歸零）`);
+  });
+
+  // ========== 13. 修正驗證：bootstrapParentAccount 冪等（重複註冊不重建家庭）==========
+  await step('13.1 家長重呼叫 bootstrapParentAccount → 回傳同一 familyId', async () => {
+    const fn = httpsCallable(P.fns, 'bootstrapParentAccount');
+    const res = await fn({ displayName: 'E2E爸爸', familyName: '不該建新的家' });
+    if (res.data.familyId !== familyId) throw new Error(`回了不同 familyId：${res.data.familyId}`);
+  });
+  await step('13.2 家長家庭數仍為 1（沒生出重複家庭）', async () => {
+    const snap = await adb.collection('familyMemberships')
+      .where('userId', '==', dadUid).where('role', '==', 'parent').where('status', '==', 'active').get();
+    if (snap.size !== 1) throw new Error(`家長 active parent membership 有 ${snap.size} 筆`);
+  });
+
   // ---- 報告 ----
   console.log('\n================ 核心迴圈 E2E 實測結果 ================');
   for (const r of results) {

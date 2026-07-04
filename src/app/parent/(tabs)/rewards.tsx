@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -70,6 +70,7 @@ export default function ParentRewards() {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [items, setItems] = useState<RewardItem[]>([]);
   const [orders, setOrders] = useState<OrderWithChild[]>([]);
+  const orderGen = useRef(0); // 世代守衛：丟棄較慢的舊快照結果
   const [showCreate, setShowCreate] = useState(false);
   const [tab, setTab] = useState<'catalog' | 'log'>('catalog');
   const [editingItem, setEditingItem] = useState<RewardItem | null>(null);
@@ -112,6 +113,7 @@ export default function ParentRewards() {
       .limit(50)
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++orderGen.current;
         const list: OrderWithChild[] = [];
         for (const d of snap.docs) {
           const order = { id: d.id, ...d.data() } as RewardOrder;
@@ -134,6 +136,7 @@ export default function ParentRewards() {
           } catch {}
           list.push({ order, itemTitle, childName });
         }
+        if (gen !== orderGen.current) return; // 舊快照 → 丟棄，避免蓋掉新結果
         setOrders(list);
       }, (err) => {
         // A8：缺索引/權限錯誤不再被吞掉。沒有這個 callback 時 FAILED_PRECONDITION

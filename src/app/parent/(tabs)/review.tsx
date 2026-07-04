@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -105,6 +105,9 @@ export default function ParentReview() {
   const [reviewOrders, setReviewOrders] = useState<ReviewOrder[]>([]);
   const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
   const [activeOrder, setActiveOrder] = useState<ReviewOrder | null>(null);
+  // 世代守衛：async 組裝期間新快照到達時，丟棄較慢的舊結果，避免審完的卡片重新冒出來。
+  const taskGen = useRef(0);
+  const orderGen = useRef(0);
 
   useEffect(() => {
     if (!family) return;
@@ -114,41 +117,48 @@ export default function ParentReview() {
       .where('status', '==', 'submitted')
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++taskGen.current;
         const list: ReviewTask[] = [];
         for (const doc of snap.docs) {
-          const instance = { id: doc.id, ...doc.data() } as TaskInstance;
-          const subSnap = await firestore()
-            .collection('taskSubmissions')
-            .where('familyId', '==', family.id)
-            .where('taskInstanceId', '==', instance.id)
-            .orderBy('submittedAt', 'desc')
-            .limit(1)
-            .get();
-          if (subSnap.empty) continue;
-          const submission = {
-            id: subSnap.docs[0].id,
-            ...subSnap.docs[0].data(),
-          } as TaskSubmission;
-          const taskDoc = await firestore()
-            .collection('tasks')
-            .doc(instance.taskId)
-            .get();
-          const taskData = taskDoc.data();
-          const { name: childName } = await resolveMemberDisplay(
-            family.id,
-            instance.userId,
-            '小朋友'
-          );
-          list.push({
-            instance,
-            submission,
-            taskTitle: taskData?.title || '—',
-            taskPoints: taskData?.points || 0,
-            childName,
-          });
+          try {
+            const instance = { id: doc.id, ...doc.data() } as TaskInstance;
+            const subSnap = await firestore()
+              .collection('taskSubmissions')
+              .where('familyId', '==', family.id)
+              .where('taskInstanceId', '==', instance.id)
+              .orderBy('submittedAt', 'desc')
+              .limit(1)
+              .get();
+            if (subSnap.empty) continue;
+            const submission = {
+              id: subSnap.docs[0].id,
+              ...subSnap.docs[0].data(),
+            } as TaskSubmission;
+            const taskDoc = await firestore()
+              .collection('tasks')
+              .doc(instance.taskId)
+              .get();
+            const taskData = taskDoc.data();
+            const { name: childName } = await resolveMemberDisplay(
+              family.id,
+              instance.userId,
+              '小朋友'
+            );
+            list.push({
+              instance,
+              submission,
+              taskTitle: taskData?.title || '—',
+              taskPoints: taskData?.points || 0,
+              childName,
+            });
+          } catch (e) {
+            // 單筆組裝失敗（某個內嵌讀取被拒/缺文件）只跳過該筆，不讓整頁清單消失。
+            console.warn('[Review] task skip', doc.id, (e as any)?.code);
+          }
         }
+        if (gen !== taskGen.current) return; // 舊快照 → 丟棄
         setReviewTasks(list);
-      });
+      }, (err) => console.error('[Review] task snapshot error:', (err as any)?.code));
     return unsub;
   }, [family?.id]);
 
@@ -160,29 +170,35 @@ export default function ParentReview() {
       .where('status', '==', 'pending')
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++orderGen.current;
         const list: ReviewOrder[] = [];
         for (const doc of snap.docs) {
-          const order = { id: doc.id, ...doc.data() } as RewardOrder;
-          const itemDoc = await firestore()
-            .collection('rewardItems')
-            .doc(order.itemId)
-            .get();
-          const itemData = itemDoc.data();
-          const { name: childName } = await resolveMemberDisplay(
-            family.id,
-            order.userId,
-            '小朋友'
-          );
-          list.push({
-            order,
-            item: itemData
-              ? ({ id: itemDoc.id, ...itemData } as RewardItem)
-              : null,
-            childName,
-          });
+          try {
+            const order = { id: doc.id, ...doc.data() } as RewardOrder;
+            const itemDoc = await firestore()
+              .collection('rewardItems')
+              .doc(order.itemId)
+              .get();
+            const itemData = itemDoc.data();
+            const { name: childName } = await resolveMemberDisplay(
+              family.id,
+              order.userId,
+              '小朋友'
+            );
+            list.push({
+              order,
+              item: itemData
+                ? ({ id: itemDoc.id, ...itemData } as RewardItem)
+                : null,
+              childName,
+            });
+          } catch (e) {
+            console.warn('[Review] order skip', doc.id, (e as any)?.code);
+          }
         }
+        if (gen !== orderGen.current) return; // 舊快照 → 丟棄
         setReviewOrders(list);
-      });
+      }, (err) => console.error('[Review] order snapshot error:', (err as any)?.code));
     return unsub;
   }, [family?.id]);
 
@@ -566,18 +582,29 @@ function RedeemConfirmSheet({
 
   const handleApprove = async () => {
     try {
-      await firestore()
-        .collection('rewardOrders')
-        .doc(order.order.id)
-        .update({
+      // 用交易重讀現況：只有仍是 pending 的訂單能被核准。避免核准一筆已被小孩取消 /
+      // 已被 CF 因餘額不足退回的訂單——那會在點數已退還後仍讓小孩領獎。
+      const ref = firestore().collection('rewardOrders').doc(order.order.id);
+      await firestore().runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw new Error('ORDER_GONE');
+        if (snap.data()?.status !== 'pending') throw new Error('ORDER_NOT_PENDING');
+        tx.update(ref, {
           status: 'approved',
           approvedAt: firestore.FieldValue.serverTimestamp(),
           ...(note.trim() ? { parentNote: note.trim() } : {}),
         });
+      });
       Keyboard.dismiss();
       onClose();
     } catch (e: any) {
-      Alert.alert('同意失敗', e?.message || '不明錯誤');
+      const msg =
+        e?.message === 'ORDER_NOT_PENDING'
+          ? '這筆訂單狀態已改變（可能已被取消或退回），請重新整理。'
+          : e?.message === 'ORDER_GONE'
+          ? '這筆訂單已不存在。'
+          : e?.message || '不明錯誤';
+      Alert.alert('同意失敗', msg);
     }
   };
 
@@ -587,17 +614,26 @@ function RedeemConfirmSheet({
       return;
     }
     try {
-      await firestore()
-        .collection('rewardOrders')
-        .doc(order.order.id)
-        .update({
+      const ref = firestore().collection('rewardOrders').doc(order.order.id);
+      await firestore().runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw new Error('ORDER_GONE');
+        if (snap.data()?.status !== 'pending') throw new Error('ORDER_NOT_PENDING');
+        tx.update(ref, {
           status: 'rejected',
           parentNote: note.trim(),
         });
+      });
       Keyboard.dismiss();
       onClose();
     } catch (e: any) {
-      Alert.alert('婉拒失敗', e?.message || '不明錯誤');
+      const msg =
+        e?.message === 'ORDER_NOT_PENDING'
+          ? '這筆訂單狀態已改變，請重新整理。'
+          : e?.message === 'ORDER_GONE'
+          ? '這筆訂單已不存在。'
+          : e?.message || '不明錯誤';
+      Alert.alert('婉拒失敗', msg);
     }
   };
 

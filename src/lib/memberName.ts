@@ -27,14 +27,21 @@ export async function resolveMemberUser(
   if (direct.exists()) {
     return { id: direct.id, ...direct.data() } as User;
   }
-  const q = await firestore()
-    .collection('users')
-    .where('authProviderId', '==', userId)
-    .limit(1)
-    .get();
-  if (!q.empty) {
-    const d = q.docs[0];
-    return { id: d.id, ...d.data() } as User;
+  // Fallback：doc id ≠ userId 的舊資料。注意加固後 users list 規則只放行「查自己」
+  // （authProviderId == 自己 uid），家長查小孩會 permission-denied。包起來降級成 null，
+  // 讓呼叫端退回 fallback 顯示名，而不是整個成員/審核清單被拋錯炸掉。
+  try {
+    const q = await firestore()
+      .collection('users')
+      .where('authProviderId', '==', userId)
+      .limit(1)
+      .get();
+    if (!q.empty) {
+      const d = q.docs[0];
+      return { id: d.id, ...d.data() } as User;
+    }
+  } catch (e) {
+    console.warn('[memberName] fallback query blocked:', (e as any)?.code);
   }
   return null;
 }
