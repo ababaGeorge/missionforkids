@@ -27,22 +27,32 @@
 建任務防連點、管理頁 instances 改即時訂閱。
 其他：storage 5MB→12MB、jest config。
 
-## 驗證（全綠）
+## 追加：補做設計文件核心產品缺口（同分支後續 commit）
 
-app tsc 0 錯誤｜RN jest 13/13｜functions jest 59/59｜**core-loop E2E 52/52**
+- **B3 週期任務自動排程**（`fa6ec6f`）：`lib/recurrence.ts`（computeNextDue 每日/每週/每月含
+  月底 eom + rolloverRecurringTasks 冪等結算）+ `rolloverRecurringTasksScheduled`
+  onSchedule 每日 00:10 Asia/Taipei。11 個單元測試。
+- **B6 完成統計真實化**（`74ce556`）：「我的」頁連續天數真算、徽章改資料驅動里程碑。
+- **B10 孩子提議任務**（`039e123`）：rules 放行小孩建 proposed 任務、小孩提議 UI、
+  家長「孩子的提議」核准（→active+建 instance）/婉拒。E2E +4 步。
+
+## PR
+
+**PR #8 開好了**（draft，base main）：https://github.com/ababaGeorge/missionforkids/pull/8
+含全部本輪 commit（emulator 修復 + 18 bug + B3/B6/B10）。
+
+## 驗證（全綠，最終）
+
+app tsc 0 錯誤｜RN jest 13/13｜functions jest **70/70**｜**core-loop E2E 56/56**
 
 ## ⚠️ 待辦（需人工）
-
-1. **開新 PR**：PR #7 已 merged，本輪是新工作需**新 PR**（base: main）。這次 remote session
-   的 GitHub 連接器斷線/需重新授權，無法自動開 —— 在互動環境用 /mcp 授權後開，或本機開。
-   分支已推：`claude/continue-afternoon-work-cfse3p`（領先 main 兩個 commit）。
 2. **prod 部署**（remote 無 firebase 憑證，未執行）：
    ```
    firebase deploy --only firestore:rules,firestore:indexes,storage --project mission-for-kids
    firebase deploy --only functions --project mission-for-kids
    ```
-   本輪改了 `storage.rules`（12MB）與多個 CF（acceptFamilyInvite / onRewardOrderCreated），
-   不部署不會在 prod 生效。
+   本輪改了 `firestore.rules`（B10）、`storage.rules`（12MB）與多個 CF（含新增
+   scheduled function rolloverRecurringTasksScheduled），不部署不會在 prod 生效。
 3. **A7 補刀仍待做**：舊密碼 `mfk-dev-2026!` 已公開，Firebase Console 改三個 @mfk.test 密碼。
 
 ## 未修（產品缺口 / 需外部動作，非 bug）
