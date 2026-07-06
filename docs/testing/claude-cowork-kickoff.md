@@ -15,17 +15,17 @@
 
 ## 環境現況（應已就緒）
 - iOS 模擬器 **iPhone 17**（device id `C6986BCA-EA1E-48E9-B324-5DC5A54D4F67`）正在跑 Mission for Kids 當前 dev build（bundle id `com.missionforkids.app`，scheme `missionforkids`）。
-- **Metro** 在背景執行，且帶了 `EXPO_PUBLIC_DEV_PASSWORD=mfktest2026`，所以登入畫面的「家長／小安／小宇」快速鈕會**自動填入帳號密碼**。
+- **Metro** 在背景執行，且已帶入 dev 密碼環境變數（`EXPO_PUBLIC_DEV_PASSWORD`），所以登入畫面的「家長／小安／小宇」快速鈕會**自動填入帳號密碼**。
 - 若模擬器沒開、App 沒跑或載不出來 → 見文末「## 環境還原」。
 
 ## 測試帳號（同一個測試家庭 `dev-family-seed`）
 | 角色 | Email | 密碼 |
 |---|---|---|
-| 家長 | `dev-parent@mfk.test` | `mfktest2026` |
-| 小孩·小安 | `dev-kid1@mfk.test` | `mfktest2026` |
-| 小孩·小宇 | `dev-kid2@mfk.test` | `mfktest2026` |
+| 家長 | `dev-parent@mfk.test` | 見下方說明 |
+| 小孩·小安 | `dev-kid1@mfk.test` | 見下方說明 |
+| 小孩·小宇 | `dev-kid2@mfk.test` | 見下方說明 |
 
-登入畫面有「家長／小安／小宇」dev 快速鈕會自動填，點了再按黃色「登入」即可；或手動輸入上表帳密。
+**密碼不寫在 repo 裡（資安）。** Metro 已帶入 dev 密碼，登入畫面「家長／小安／小宇」快速鈕會**自動填入帳密**——點快速鈕再按黃色「登入」即可，**你不需要知道密碼值**。若需手動輸入或重啟 Metro，向 ababaGeorge 索取 dev 密碼。
 
 ## 任務步驟
 1. 先讀 `docs/testing/2026-07-06-manual-test-plan.md` 全文，理解結構。
@@ -62,6 +62,6 @@
 2. **裝 App**（若沒裝）：下載 dev build 解壓後安裝——
    `curl -sL -o /tmp/mfk.tar.gz "https://expo.dev/artifacts/eas/WLN_OzSzwFc12Jv-wvYDyeKZAXBf5zOAgmuGi9uTBjQ.tar.gz" && tar -xzf /tmp/mfk.tar.gz -C /tmp && xcrun simctl install C6986BCA-EA1E-48E9-B324-5DC5A54D4F67 /tmp/MissionforKids.app`
    （此連結是 2026-07-06 的 build；若失效，改跑 `eas build --profile development --platform ios` 重出一個，或問 ababaGeorge。）
-3. **起 Metro**（背景）：`EXPO_PUBLIC_DEV_PASSWORD='mfktest2026' npx expo start --dev-client`
+3. **起 Metro**（背景）：`EXPO_PUBLIC_DEV_PASSWORD='<向 ababaGeorge 索取>' npx expo start --dev-client`
 4. **開 App**：`xcrun simctl launch C6986BCA-EA1E-48E9-B324-5DC5A54D4F67 com.missionforkids.app` → 若跳出 expo 開發者選單彈窗，按「Continue」→ 若沒自動載入 bundle，用 deep link：`xcrun simctl openurl C6986BCA-EA1E-48E9-B324-5DC5A54D4F67 "missionforkids://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"` 並按確認框的「打開」。
 5. 出現「歡迎來到任務獎勵」登入畫面即就緒。

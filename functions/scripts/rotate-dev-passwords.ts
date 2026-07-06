@@ -13,7 +13,7 @@
 //   ! gcloud auth application-default set-quota-project mission-for-kids
 //
 // 執行（在 functions/ 底下，密碼用 env 帶入，不會進 shell history 以外的地方）：
-//   cd functions && DEV_SEED_PASSWORD='mfktest2026' node --experimental-strip-types scripts/rotate-dev-passwords.ts
+//   cd functions && DEV_SEED_PASSWORD='<新密碼，勿寫進原始碼>' node --experimental-strip-types scripts/rotate-dev-passwords.ts
 
 import { createRequire } from 'node:module';
 
