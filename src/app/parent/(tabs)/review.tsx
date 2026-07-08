@@ -602,10 +602,19 @@ function RedeemConfirmSheet({
   };
 
   const cost = order.order.pointCostSnapshot;
+  // BUG-06：優先用下單當時 CF 寫入的快照（訂單 doc 上兩欄位都存在）——不受下單到審核
+  // 之間孩子又賺點的影響。舊訂單沒有快照欄位 → fallback 回推（用「目前」餘額回推，
+  // 可能因期間又賺點而失真，但總比沒有好）。
+  const hasSnapshot =
+    order.order.balanceBeforeSnapshot != null && order.order.balanceAfterSnapshot != null;
   // 孩子申請時 cloud function 已扣點。balance 是 *扣後* 餘額。
   // 「兌換前」= balance + cost（還沒扣的狀態），「兌換後」= balance（同意後維持扣除）。
-  const beforeBalance = balance != null ? balance + cost : null;
-  const afterBalance = balance;
+  const beforeBalance = hasSnapshot
+    ? order.order.balanceBeforeSnapshot!
+    : balance != null
+      ? balance + cost
+      : null;
+  const afterBalance = hasSnapshot ? order.order.balanceAfterSnapshot! : balance;
 
   return (
     <Modal

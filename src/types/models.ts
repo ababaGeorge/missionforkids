@@ -195,6 +195,10 @@ export interface RewardOrder {
   userId: string;
   childId?: string;
   pointCostSnapshot: number;
+  // BUG-06：下單當時的扣款前/後錢包餘額快照（CF 扣款 transaction 內寫入）。
+  // optional 是向下相容關鍵——舊訂單沒有這兩個欄位，client 讀取要 fallback 回推邏輯。
+  balanceBeforeSnapshot?: number;
+  balanceAfterSnapshot?: number;
   status: RewardOrderStatus;
   cancelledAt: Timestamp | null;
   approvedAt: Timestamp | null;
