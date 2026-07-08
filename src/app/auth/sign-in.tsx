@@ -184,7 +184,10 @@ export default function SignIn() {
                         placeholder="你的暱稱"
                         placeholderTextColor={P.muted}
                         value={displayName}
-                        onChangeText={setDisplayName}
+                        onChangeText={(v) => {
+                          setDisplayName(v);
+                          setErrorMsg('');
+                        }}
                         style={styles.input}
                       />
                       <TextInput
@@ -192,7 +195,10 @@ export default function SignIn() {
                         placeholder="家庭名稱"
                         placeholderTextColor={P.muted}
                         value={familyName}
-                        onChangeText={setFamilyName}
+                        onChangeText={(v) => {
+                          setFamilyName(v);
+                          setErrorMsg('');
+                        }}
                         style={styles.input}
                       />
                     </>

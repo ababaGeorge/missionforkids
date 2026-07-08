@@ -143,6 +143,7 @@ export interface TaskInstance {
   reviewedAt: Timestamp | null;
   pointsAwarded: number | null;
   parentNote?: string | null;
+  submittedAt?: Timestamp;
 }
 
 export type AiResult = 'pass' | 'fail' | 'uncertain';

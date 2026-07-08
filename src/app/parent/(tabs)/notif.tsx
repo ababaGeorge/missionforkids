@@ -84,7 +84,7 @@ export default function ParentNotif() {
               childName: member.name,
               points: taskDoc.data()?.points ?? null,
               // 「已提交待審」通知的時間該用提交時間，不是任務截止日（periodEnd）。
-              sortDate: (inst as any).submittedAt ?? inst.periodEnd,
+              sortDate: inst.submittedAt ?? inst.periodEnd,
             });
           } catch (e) {
             console.warn('[ParentNotif] task skip', doc.id, (e as any)?.code);
