@@ -66,7 +66,6 @@ export default function ParentNotif() {
       .collection('taskInstances')
       .where('familyId', '==', familyId)
       .where('status', '==', 'submitted')
-      .limit(20)
       .onSnapshot(async (snap) => {
         if (!snap) return;
         const gen = ++taskGen.current;
@@ -84,7 +83,8 @@ export default function ParentNotif() {
               title: taskDoc.data()?.title ?? '任務',
               childName: member.name,
               points: taskDoc.data()?.points ?? null,
-              sortDate: inst.periodEnd,
+              // 「已提交待審」通知的時間該用提交時間，不是任務截止日（periodEnd）。
+              sortDate: (inst as any).submittedAt ?? inst.periodEnd,
             });
           } catch (e) {
             console.warn('[ParentNotif] task skip', doc.id, (e as any)?.code);
@@ -104,7 +104,6 @@ export default function ParentNotif() {
       .collection('rewardOrders')
       .where('familyId', '==', familyId)
       .where('status', '==', 'pending')
-      .limit(20)
       .onSnapshot(async (snap) => {
         if (!snap) return;
         const gen = ++orderGen.current;
