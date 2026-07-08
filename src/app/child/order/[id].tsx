@@ -85,6 +85,7 @@ export default function ChildOrderDetail() {
       });
     } catch {
       Alert.alert('出錯了', '再試一次。');
+    } finally {
       setSubmitting(false);
     }
   };
@@ -105,9 +106,13 @@ export default function ChildOrderDetail() {
               status: 'cancelled',
               cancelledAt: firestore.FieldValue.serverTimestamp(),
             });
-            onClose();
+            // 成功取消後顯示明確回饋：星星會在幾秒內退回
+            Alert.alert('已取消', '星星會在幾秒內退回你的錢包 ✨', [
+              { text: '好', onPress: () => onClose() },
+            ]);
           } catch {
             Alert.alert('出錯了', '再試一次。');
+          } finally {
             setSubmitting(false);
           }
         },

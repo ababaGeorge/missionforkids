@@ -70,7 +70,36 @@ export default function ChildMe() {
   }, [uid, familyId, childId]);
 
   const stars = wallet?.balance || 0;
-  const streak = 0;
+
+  const toDate = (ts: any): Date =>
+    typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
+  const dayKey = (d: Date) =>
+    `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+  // 完成統計（真實資料）
+  const totalApproved = useMemo(
+    () => instances.filter((i) => i.status === 'approved').length,
+    [instances]
+  );
+
+  // 連續天數：從今天（若今天沒有則從昨天）往回數，每天至少完成一個任務
+  const streak = useMemo(() => {
+    const days = new Set<string>();
+    for (const inst of instances) {
+      if (inst.status !== 'approved' || !inst.reviewedAt) continue;
+      days.add(dayKey(toDate(inst.reviewedAt)));
+    }
+    if (days.size === 0) return 0;
+    const cur = new Date();
+    cur.setHours(0, 0, 0, 0);
+    if (!days.has(dayKey(cur))) cur.setDate(cur.getDate() - 1);
+    let count = 0;
+    while (days.has(dayKey(cur))) {
+      count += 1;
+      cur.setDate(cur.getDate() - 1);
+    }
+    return count;
+  }, [instances]);
 
   const age = useMemo(() => {
     if (!user?.birthday) return null;
@@ -90,13 +119,14 @@ export default function ChildMe() {
 
   const firstChar = (user?.displayName || '你').charAt(0);
 
+  // 徽章全部改成資料驅動的里程碑（原本 早睡達人/音樂家/讀書蟲 是寫死的假徽章）
   const badges: Badge[] = [
-    { id: 'b1', emoji: '⭐', zh: '第一次', got: stars >= 5 },
-    { id: 'b2', emoji: '🔥', zh: '連 7 天', got: streak >= 7 },
-    { id: 'b3', emoji: '🌙', zh: '早睡達人', got: false },
+    { id: 'b1', emoji: '⭐', zh: '第一次完成', got: totalApproved >= 1 },
+    { id: 'b2', emoji: '🌱', zh: '連 3 天', got: streak >= 3 },
+    { id: 'b3', emoji: '🔥', zh: '連 7 天', got: streak >= 7 },
     { id: 'b4', emoji: '✨', zh: '100 星光', got: stars >= 100 },
-    { id: 'b5', emoji: '♪', zh: '音樂家', got: false },
-    { id: 'b6', emoji: '📖', zh: '讀書蟲', got: true },
+    { id: 'b5', emoji: '🏅', zh: '完成 10 個', got: totalApproved >= 10 },
+    { id: 'b6', emoji: '👑', zh: '完成 25 個', got: totalApproved >= 25 },
   ];
 
   const badgeCount = badges.filter((b) => b.got).length;

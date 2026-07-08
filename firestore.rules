@@ -162,13 +162,24 @@ service cloud.firestore {
     // A6 修復：核准（→approved）只有家長；小孩只能建單(pending)、確認收到(→completed)、取消(pending→cancelled)。
     match /rewardOrders/{orderId} {
       allow read: if isFamilyMember(resource.data.familyId);
-      // 小孩建自己的訂單，初始 pending
+      // 小孩建自己的訂單，初始 pending。
+      // balanceBeforeSnapshot/balanceAfterSnapshot 是 CF 扣款時才寫的 server 權威快照，
+      // create 時禁止預埋——成功路徑 CF 會覆寫沒事，但被拒訂單（品項無效/沒錢包/餘額不足）
+      // 只改 status，client 預埋的偽值會殘留在 doc 上污染對帳。
       allow create: if isFamilyMember(request.resource.data.familyId)
         && request.resource.data.userId == request.auth.uid
-        && request.resource.data.status == 'pending';
+        && request.resource.data.status == 'pending'
+        && !request.resource.data.keys().hasAny(['balanceBeforeSnapshot', 'balanceAfterSnapshot']);
       allow update: if isFamilyMember(resource.data.familyId) && (
-        // 家長：核准 / 拒絕 / 交付
-        isFamilyParent(resource.data.familyId)
+        // 家長：核准 / 拒絕 / 交付。balanceBeforeSnapshot/balanceAfterSnapshot（P8：
+        // 扣款當下餘額快照，對帳用）只有 onRewardOrderCreated CF（admin SDK）能寫，
+        // 家長 client 端 update 一律不可動這兩欄——用 diff() 而非等式比較，
+        // 因為舊訂單（此欄位上線前建立）根本沒有這兩欄位，等式比較會因欄位不存在而 error→擋掉
+        // 家長既有的合法核准/拒絕/交付操作。diff() 只在「這兩欄位被動到」時才擋。
+        (
+          isFamilyParent(resource.data.familyId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['balanceBeforeSnapshot', 'balanceAfterSnapshot'])
+        )
         ||
         // 訂單擁有者（小孩）：金額/品項/身分不可變，且僅限兩種合法流轉
         (
@@ -177,6 +188,9 @@ service cloud.firestore {
           && request.resource.data.familyId == resource.data.familyId
           && request.resource.data.itemId == resource.data.itemId
           && request.resource.data.userId == resource.data.userId
+          // 同上：diff() 相容缺欄位的舊訂單，擋小孩在 pending→cancelled /
+          // approved|delivered→completed 這兩個合法流轉時順手竄改快照值。
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['balanceBeforeSnapshot', 'balanceAfterSnapshot'])
           && (
             // 確認收到：approved/delivered → completed
             (resource.data.status in ['approved', 'delivered'] && request.resource.data.status == 'completed')

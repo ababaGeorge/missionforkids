@@ -48,6 +48,10 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect((await db().collection('pointWallets').doc(`${familyId}_kid`).get()).data()?.balance).toBe(70);
     const pt = await db().collection('pointTransactions').doc('reward_order_ord-1').get();
     expect(pt.data()).toMatchObject({ walletId: `${familyId}_kid`, delta: -30, sourceType: 'reward_order' });
+    // BUG-06：訂單 doc 帶下單當時扣款前/後餘額快照，before - cost = after。
+    const orderDoc = await db().collection('rewardOrders').doc('ord-1').get();
+    expect(orderDoc.data()?.balanceBeforeSnapshot).toBe(100);
+    expect(orderDoc.data()?.balanceAfterSnapshot).toBe(70);
   });
 
   // A2 核心回歸：client 謊報 pointCostSnapshot=1，但實際扣的是 item 權威售價 30。

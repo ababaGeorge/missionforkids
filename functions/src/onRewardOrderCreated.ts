@@ -78,7 +78,13 @@ export const onRewardOrderCreated = onDocumentCreated(
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       // 把 client 寫的 pointCostSnapshot 正規化成權威售價（顯示與退款一致）
-      tx.update(snap.ref, { pointCostSnapshot: authoritativeCost });
+      // BUG-06 修復：把下單當時的扣款前/後餘額寫回訂單 doc，審核 sheet 不用再回推「目前餘額＋cost」
+      // （下單到審核之間小孩若又賺了點，回推會失真）。同一 transaction 內寫，語意跟扣款原子綁定。
+      tx.update(snap.ref, {
+        pointCostSnapshot: authoritativeCost,
+        balanceBeforeSnapshot: wallet.balance,
+        balanceAfterSnapshot: wallet.balance - authoritativeCost,
+      });
       tx.set(ptRef, {
         walletId: wallet.ref.id,
         childId,
