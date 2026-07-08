@@ -85,6 +85,7 @@ export default function ChildOrderDetail() {
       });
     } catch {
       Alert.alert('出錯了', '再試一次。');
+    } finally {
       setSubmitting(false);
     }
   };
