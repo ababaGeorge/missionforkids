@@ -227,7 +227,9 @@ export default function ChildRewards() {
             ) : (
               <View style={styles.grid}>
                 {items.map((r) => {
-                  const can = balance >= r.pointCost && !activeOrder;
+                  const affordable = balance >= r.pointCost;
+                  const blockedByOrder = !!activeOrder;
+                  const can = affordable && !blockedByOrder;
                   const short = Math.max(0, r.pointCost - balance);
                   return (
                     <Pressable
@@ -264,7 +266,12 @@ export default function ChildRewards() {
                           ★ {r.pointCost}
                         </Data>
                       </View>
-                      {!can && short > 0 && (
+                      {blockedByOrder && (
+                        <Muted style={{ fontSize: 10, marginTop: 2 }}>
+                          先完成上一個兌換喔
+                        </Muted>
+                      )}
+                      {!blockedByOrder && !affordable && (
                         <Muted style={{ fontSize: 10, marginTop: 2 }}>
                           還差 {short}
                         </Muted>
