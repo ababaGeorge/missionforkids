@@ -87,7 +87,13 @@ type TaskWithInstances = { task: Task; instances: TaskInstance[] };
 export default function ParentTasks() {
   const uid = auth().currentUser?.uid;
   const [tab, setTab] = useState<'manage' | 'history'>('manage');
-  const [tasks, setTasks] = useState<TaskWithInstances[]>([]);
+  const [taskDocs, setTaskDocs] = useState<Task[]>([]);
+  // 全家庭 taskInstances 即時訂閱，依 taskId 分組；tasks 由此 join 而成，不再是一次性快照。
+  const [instByTask, setInstByTask] = useState<Record<string, TaskInstance[]>>({});
+  const tasks = useMemo<TaskWithInstances[]>(
+    () => taskDocs.map((task) => ({ task, instances: instByTask[task.id] ?? [] })),
+    [taskDocs, instByTask]
+  );
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [children, setChildren] = useState<{ id: string; name: string; childId: string }[]>([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -115,23 +121,30 @@ export default function ParentTasks() {
       .where('familyId', '==', familyId)
       .where('status', '==', 'active')
       .orderBy('createdAt', 'desc')
-      .onSnapshot(async (snap) => {
+      .onSnapshot((snap) => {
         if (!snap) return;
-        const list: TaskWithInstances[] = [];
-        for (const doc of snap.docs) {
-          const task = { id: doc.id, ...doc.data() } as Task;
-          const instSnap = await firestore()
-            .collection('taskInstances')
-            .where('taskId', '==', task.id)
-            .where('familyId', '==', familyId)
-            .get();
-          const instances = instSnap.docs.map(
-            (d) => ({ id: d.id, ...d.data() } as TaskInstance)
-          );
-          list.push({ task, instances });
-        }
-        setTasks(list);
+        setTaskDocs(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Task)));
       }, (err) => console.error('[ParentTasks] tasks error:', (err as any)?.code));
+    return unsub;
+  }, [familyId]);
+
+  // 全家庭 taskInstances 即時訂閱：建立指派、小孩提交、家長核准都會即時反映在卡片與編輯 modal，
+  // 不再依賴 tasks 變動才重抓（原本的一次性 get() 導致新指派要重登才顯示、編輯 modal 讀到空陣列、
+  // 編輯儲存的去重表用到 stale 資料而重複建立 instance）。
+  useEffect(() => {
+    if (!familyId) return;
+    const unsub = firestore()
+      .collection('taskInstances')
+      .where('familyId', '==', familyId)
+      .onSnapshot((snap) => {
+        if (!snap) return;
+        const grouped: Record<string, TaskInstance[]> = {};
+        for (const d of snap.docs) {
+          const inst = { id: d.id, ...d.data() } as TaskInstance;
+          (grouped[inst.taskId] ??= []).push(inst);
+        }
+        setInstByTask(grouped);
+      }, (err) => console.error('[ParentTasks] instances error:', (err as any)?.code));
     return unsub;
   }, [familyId]);
 
@@ -492,6 +505,7 @@ function CreateTaskModal({
   // assignee userId → 永久 childId（點數釘 childId）；找不到退回 userId
   const childIdOf = (assigneeUserId: string) =>
     children.find((c) => c.id === assigneeUserId)?.childId ?? assigneeUserId;
+  const [saving, setSaving] = useState(false); // 防連點：多筆網路寫入期間鎖住送出
   const [form, setForm] = useState({
     title: '',
     points: '10',
@@ -536,6 +550,8 @@ function CreateTaskModal({
       setForm({
         title: t.title,
         points: String(t.points),
+        // editing.instances 現在來自即時的 instByTask 訂閱（見上方 tasks useMemo），
+        // 不再是開卡片當下的一次性快照 —— 指派給才會正確預填。
         selectedChildren: editing.instances
           .map((i) => i.userId)
           .filter((v, i, a) => a.indexOf(v) === i),
@@ -616,6 +632,7 @@ function CreateTaskModal({
 
   const handleCreate = async () => {
     if (!familyId || !uid || !form.title.trim()) return;
+    if (saving) return; // 防連點：避免重複建立任務與重複 instances
     const assignees =
       form.selectedChildren.length > 0
         ? form.selectedChildren
@@ -626,6 +643,7 @@ function CreateTaskModal({
       Alert.alert('錯誤', '請先新增孩子到家庭');
       return;
     }
+    setSaving(true);
     try {
       const now = firestore.Timestamp.now();
       const periodEnd = getPeriodEnd();
@@ -647,6 +665,8 @@ function CreateTaskModal({
           assigneeType: assignees.length > 1 ? 'family' : 'individual',
           assigneeUserId: assignees.length === 1 ? assignees[0] : null,
         });
+        // 去重表同樣吃即時的 editing.instances（來自 instByTask），
+        // 不會把既有指派誤判為新指派而重複 add() 一份 instance。
         const existingByUser = new Map(
           editing.instances.map((i) => [i.userId, i])
         );
@@ -727,6 +747,8 @@ function CreateTaskModal({
       onClose();
     } catch (e: any) {
       Alert.alert(editing ? '儲存失敗' : '建立失敗', e?.message || '不明錯誤');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -985,13 +1007,15 @@ function CreateTaskModal({
                   </Pressable>
                   <Pressable
                     onPress={handleCreate}
-                    disabled={!form.title.trim()}
+                    disabled={!form.title.trim() || saving}
                     style={[
                       modalStyles.saveBtn,
-                      !form.title.trim() && { opacity: 0.5 },
+                      (!form.title.trim() || saving) && { opacity: 0.5 },
                     ]}
                   >
-                    <Label style={{ color: P.bg }}>{editing ? '儲存' : '建立'}</Label>
+                    <Label style={{ color: P.bg }}>
+                      {saving ? '處理中…' : editing ? '儲存' : '建立'}
+                    </Label>
                   </Pressable>
                 </View>
               </ScrollView>
