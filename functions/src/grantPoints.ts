@@ -1,5 +1,6 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
 import { isValidPointsValue } from './lib/points';
 
@@ -89,14 +90,14 @@ export const grantPoints = onCall(async (request) => {
         userId: childUserId,
         familyId,
         balance: initial,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     } else {
       const next = Math.max(0, wallet.balance + amount); // 餘額不低於 0
       delta = next - wallet.balance;
       tx.update(wallet.ref, {
         balance: next,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     }
 
@@ -109,7 +110,7 @@ export const grantPoints = onCall(async (request) => {
         sourceId: null,
         createdBy: uid,
         note: reason || (amount < 0 ? 'Parent deduct' : 'Parent grant'),
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
     }
   });

@@ -2,6 +2,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import { defineSecret } from 'firebase-functions/params';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import OpenAI from 'openai';
 
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
@@ -126,7 +127,7 @@ export const analyzePhoto = onCall(
         messageZh: result.messageZh,
         messageEn: result.messageEn,
         model: 'gpt-4o-mini',
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
 
       await writeBackAiResult(submissionId, callerUid, result.result, null);

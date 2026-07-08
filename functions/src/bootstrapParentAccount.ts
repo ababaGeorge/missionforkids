@@ -1,5 +1,6 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 
 export const bootstrapParentAccount = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -9,7 +10,7 @@ export const bootstrapParentAccount = onCall(async (request) => {
   if (!displayName || !familyName) throw new HttpsError('invalid-argument', 'displayName 與 familyName 必填');
   const email = (request.auth?.token?.email as string | undefined) ?? null;
   const db = admin.firestore();
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
   return db.runTransaction(async (tx) => {
     const userRef = db.collection('users').doc(uid);
     const userSnap = await tx.get(userRef);

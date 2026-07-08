@@ -1,6 +1,7 @@
 process.env.RESEND_API_KEY = 're_test';
 
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import functionsTest from 'firebase-functions-test';
 
 // mock 寄信：不打真網路，且可斷言被呼叫
@@ -19,7 +20,7 @@ async function seedParent(uid: string, familyId: string) {
     displayName: '我們家',
     defaultGraceDays: 2,
     createdBy: uid,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
   });
   await db.collection('familyMemberships').doc(`${uid}_${familyId}`).set({
     familyId,
@@ -27,7 +28,7 @@ async function seedParent(uid: string, familyId: string) {
     role: 'parent',
     status: 'active',
     invitedBy: uid,
-    joinedAt: admin.firestore.FieldValue.serverTimestamp(),
+    joinedAt: FieldValue.serverTimestamp(),
   });
 }
 

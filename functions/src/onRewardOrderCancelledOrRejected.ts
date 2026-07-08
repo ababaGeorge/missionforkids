@@ -1,6 +1,7 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 
 const db = admin.firestore;
 
@@ -61,8 +62,8 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
 
       // --- writes ---
       tx.update(walletRef, {
-        balance: admin.firestore.FieldValue.increment(refundAmount),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        balance: FieldValue.increment(refundAmount),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       tx.set(refundRef, {
         walletId,
@@ -72,7 +73,7 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
         sourceId: orderId,
         createdBy: null,
         note: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
     });
 

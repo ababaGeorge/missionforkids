@@ -1,6 +1,7 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
 import { isValidPointsValue } from './lib/points';
 
@@ -74,8 +75,8 @@ export const onRewardOrderCreated = onDocumentCreated(
       }
 
       tx.update(wallet.ref, {
-        balance: admin.firestore.FieldValue.increment(-authoritativeCost),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        balance: FieldValue.increment(-authoritativeCost),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       // 把 client 寫的 pointCostSnapshot 正規化成權威售價（顯示與退款一致）
       // BUG-06 修復：把下單當時的扣款前/後餘額寫回訂單 doc，審核 sheet 不用再回推「目前餘額＋cost」
@@ -93,7 +94,7 @@ export const onRewardOrderCreated = onDocumentCreated(
         sourceId: orderId,
         createdBy: null,
         note: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
     });
 

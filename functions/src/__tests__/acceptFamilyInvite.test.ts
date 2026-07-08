@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import functionsTest from 'firebase-functions-test';
 import { acceptFamilyInvite } from '../acceptFamilyInvite';
 
@@ -19,8 +20,8 @@ async function seedInvite(
     status: 'pending',
     childProfile: { displayName: '小明', nickname: '阿明', avatarEmoji: '🦊' },
     acceptedBy: null,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 86400000),
+    createdAt: FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 86400000),
     ...overrides,
   });
 }
@@ -89,7 +90,7 @@ describe('acceptFamilyInvite', () => {
 
   it('invite 已過期 → failed-precondition INVITE_EXPIRED', async () => {
     await seedInvite('inv-3', 'fam-3', {
-      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+      expiresAt: Timestamp.fromMillis(Date.now() - 1000),
     });
     await expect(
       fft.wrap(acceptFamilyInvite)({
