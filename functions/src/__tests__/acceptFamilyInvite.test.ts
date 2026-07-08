@@ -134,4 +134,65 @@ describe('acceptFamilyInvite', () => {
       } as any)
     ).rejects.toThrow(/INVITE_EMAIL_MISMATCH/);
   });
+
+  it('重複接受第二張邀請 → 錢包餘額不歸零、暱稱不被覆寫、invite 標 accepted', async () => {
+    const uid = 'child-uid-7';
+    const familyId = 'fam-7';
+    await seedInvite('inv-7a', familyId);
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-7a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    const db = admin.firestore();
+    // 模擬小孩已賺到 20 點
+    await db.collection('pointWallets').doc(`${familyId}_${uid}`).update({ balance: 20 });
+
+    // 家長對同一 email 再開一張邀請（帶不同 childProfile）
+    await seedInvite('inv-7b', familyId, {
+      childProfile: { displayName: '新名字', nickname: '新暱稱', avatarEmoji: '🐰' },
+    });
+    const res: any = await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-7b' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+    expect(res).toEqual({ familyId, childId: uid });
+
+    const walletDoc = await db.collection('pointWallets').doc(`${familyId}_${uid}`).get();
+    expect(walletDoc.data()!.balance).toBe(20); // 絕不重設
+
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ nickname: '阿明', avatarEmoji: '🦊', status: 'active' });
+
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()!.displayName).toBe('小明');
+
+    const invDoc = await db.collection('familyInvites').doc('inv-7b').get();
+    expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
+  });
+
+  it('家長帳號接受 child 邀請 → failed-precondition ALREADY_PARENT，user doc 不被改寫', async () => {
+    const uid = 'parent-uid-8';
+    const db = admin.firestore();
+    await db.collection('users').doc(uid).set({
+      displayName: '家長',
+      roleType: 'parent',
+      email: 'kid@example.com',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    await seedInvite('inv-8', 'fam-8');
+
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-8' },
+        auth: { uid, token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/ALREADY_PARENT/);
+
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()).toMatchObject({ displayName: '家長', roleType: 'parent' });
+
+    const invDoc = await db.collection('familyInvites').doc('inv-8').get();
+    expect(invDoc.data()!.status).toBe('pending'); // 不應被標 accepted
+  });
 });
