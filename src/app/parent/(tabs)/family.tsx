@@ -318,7 +318,7 @@ export default function FamilyScreen() {
                 <Pressable
                   onPress={() => {
                     setGrantTarget({
-                      userId: m.user.id,
+                      userId: m.membership.userId,
                       name: nameOf(m),
                     });
                     setShowGrant(true);
