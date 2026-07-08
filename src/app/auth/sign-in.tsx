@@ -31,6 +31,25 @@ const DEV_ACCOUNTS = [
   { label: '小宇', email: 'dev-kid2@mfk.test' },
 ];
 
+// UX-06：把 Firebase 原始錯誤代碼轉成家長看得懂的中文。
+// 依 e?.code 對映；登入與註冊 catch 都走這個函式。
+function mapAuthErrorMessage(code: string | undefined, isSignUp: boolean): string {
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return '帳號或密碼不對，再檢查一下';
+    case 'auth/invalid-email':
+      return 'Email 格式不對';
+    case 'auth/too-many-requests':
+      return '試太多次了，休息一下再試';
+    case 'auth/network-request-failed':
+      return '網路連不上，檢查一下網路';
+    default:
+      return isSignUp ? '註冊失敗，請再試一次' : '登入失敗，請再試一次';
+  }
+}
+
 export default function SignIn() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -40,6 +59,7 @@ export default function SignIn() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [familyName, setFamilyName] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleGoogleSignIn = async () => {
     Alert.alert(
@@ -56,19 +76,21 @@ export default function SignIn() {
   };
 
   const handleEmailSignIn = async () => {
+    setErrorMsg('');
     if (!email.trim() || !password) return;
     try {
       setLoading(true);
       await auth().signInWithEmailAndPassword(email.trim(), password);
       router.replace('/');
     } catch (e: any) {
-      Alert.alert(t('common.error'), e?.message ?? '登入失敗');
+      setErrorMsg(mapAuthErrorMessage(e?.code, false));
     } finally {
       setLoading(false);
     }
   };
 
   const handleEmailSignUp = async () => {
+    setErrorMsg('');
     if (!email.trim() || !password || !displayName.trim() || !familyName.trim()) return;
     try {
       setLoading(true);
@@ -81,7 +103,7 @@ export default function SignIn() {
       });
       router.replace('/');
     } catch (e: any) {
-      Alert.alert(t('common.error'), e?.message ?? '註冊失敗');
+      setErrorMsg(mapAuthErrorMessage(e?.code, true));
     } finally {
       setLoading(false);
     }
@@ -93,6 +115,7 @@ export default function SignIn() {
     setAuthMode('signin');
     setEmail(devEmail);
     setPassword(DEV_PASSWORD);
+    setErrorMsg(''); // 直接 set 欄位不走 onChangeText，這裡自己清舊錯誤
   };
 
   if (loading) {
@@ -103,6 +126,8 @@ export default function SignIn() {
       </View>
     );
   }
+
+  const isSubmitDisabled = loading || !email.trim() || !password;
 
   return (
     <View style={styles.root}>
@@ -132,7 +157,10 @@ export default function SignIn() {
                     autoComplete="email"
                     textContentType="emailAddress"
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={(v) => {
+                      setEmail(v);
+                      setErrorMsg('');
+                    }}
                     style={styles.input}
                   />
                   <TextInput
@@ -143,7 +171,10 @@ export default function SignIn() {
                     autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
                     textContentType={authMode === 'signup' ? 'newPassword' : 'password'}
                     value={password}
-                    onChangeText={setPassword}
+                    onChangeText={(v) => {
+                      setPassword(v);
+                      setErrorMsg('');
+                    }}
                     style={styles.input}
                   />
                   {authMode === 'signup' && (
@@ -166,11 +197,20 @@ export default function SignIn() {
                       />
                     </>
                   )}
+                  {errorMsg ? (
+                    <BodySm testID="auth-error" style={styles.errorText}>
+                      {errorMsg}
+                    </BodySm>
+                  ) : null}
                   <Pressable
                     testID="email-submit"
                     onPress={authMode === 'signin' ? handleEmailSignIn : handleEmailSignUp}
-                    disabled={loading}
-                    style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+                    disabled={isSubmitDisabled}
+                    style={({ pressed }) => [
+                      styles.primaryBtn,
+                      pressed && styles.pressed,
+                      isSubmitDisabled && styles.disabledBtn,
+                    ]}
                   >
                     <AppText style={styles.inviteButtonText}>{authMode === 'signin' ? '登入' : '註冊並建立家庭'}</AppText>
                   </Pressable>
@@ -305,6 +345,13 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
+  },
+  disabledBtn: {
+    opacity: 0.4,
+  },
+  errorText: {
+    color: '#FF6B6B',
+    fontSize: 13,
   },
   appleButton: {
     backgroundColor: '#000',
