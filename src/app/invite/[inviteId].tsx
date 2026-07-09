@@ -49,6 +49,8 @@ export default function AcceptInvite() {
       if (/INVITE_EXPIRED/.test(msg)) msg = '邀請已過期';
       if (/INVITE_ALREADY_USED/.test(msg)) msg = '邀請已被使用';
       if (/INVALID_INVITE/.test(msg)) msg = '邀請無效';
+      if (/ALREADY_PARENT/.test(msg)) msg = '這個 Email 是家長帳號，不能用小孩邀請加入';
+      if (/EMAIL_TAKEN_PASSWORD_MISMATCH/.test(msg)) msg = '這個 Email 已經註冊過但密碼不符，請輸入原本設定的密碼';
       Alert.alert('無法加入', msg);
     } finally {
       setSubmitting(false);

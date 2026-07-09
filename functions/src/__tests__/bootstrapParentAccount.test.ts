@@ -27,6 +27,22 @@ describe('bootstrapParentAccount', () => {
     await expect(wrap()({ data: { displayName: 'x', familyName: 'y' } } as any)).rejects.toThrow(/unauthenticated/i);
   });
 
+  it('既有小孩帳號 → 拋 ALREADY_CHILD，user doc 不被覆寫、不另建 family', async () => {
+    const uid = 'child-uid-1';
+    const db = admin.firestore();
+    await db.collection('users').doc(uid).set({
+      displayName: '小安', roleType: 'child', childId: uid,
+      authProvider: 'password', authProviderId: uid, email: 'kid@example.com',
+    });
+    await expect(
+      wrap()({ data: { displayName: '小安', familyName: '偷渡家庭' }, auth: { uid, token: { email: 'kid@example.com' } } } as any)
+    ).rejects.toThrow(/ALREADY_CHILD/);
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()).toMatchObject({ roleType: 'child', childId: uid, displayName: '小安' });
+    const fams = await db.collection('families').where('createdBy', '==', uid).get();
+    expect(fams.size).toBe(0);
+  });
+
   it('冪等：同一個 parent 再呼叫不會建第二個 family', async () => {
     const uid = 'parent-uid-2';
     const first: any = await wrap()({ data: { displayName: '爸爸', familyName: '家一' }, auth: { uid, token: { email: 'dad@example.com' } } } as any);
