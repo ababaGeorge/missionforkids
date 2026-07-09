@@ -103,7 +103,11 @@ export const grantPoints = onCall(async (request) => {
       });
     }
 
-    if (delta !== 0) {
+    // 冪等完整性：clamp 到 delta===0 時也要落冪等標記，否則該 key 從未註冊，
+    // 同 key 重放發生在餘額回升後會真的扣款。
+    // delta===0 只可能來自 clamp（amount===0 在入口就被擋），delta:0 本身即是 clamp 標記。
+    // 不帶 key 的 delta===0 不寫（auto-id doc 無冪等價值，只是帳目噪音）。
+    if (delta !== 0 || idempotencyKey) {
       tx.set(txRef, {
         walletId: wallet.ref.id,
         childId,

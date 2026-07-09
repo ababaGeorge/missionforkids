@@ -182,6 +182,74 @@ describe('grantPoints (childId 重構)', () => {
     expect(wallet.data()?.balance).toBe(10);
   });
 
+  it('CX-3 冪等完整性：餘額 0 扣 5（帶 key）→ delta 0 且冪等標記落盤；餘額回升後同 key 重放不真扣', async () => {
+    const familyId = 'fam-cx3-clamp-idem';
+    await seedParent('px1', familyId);
+    await seedChild('cx1', familyId, 'cx1');
+    const key = 'cx3-key-1';
+    // 餘額 0（錢包尚不存在）扣 5：clamp 到 0 → delta 0
+    const res = await call('px1', {
+      childUserId: 'cx1',
+      familyId,
+      amount: -5,
+      reason: '',
+      idempotencyKey: key,
+    });
+    expect(res).toMatchObject({ success: true, delta: 0 });
+    // 冪等標記（確定性 id）必須存在，delta 0
+    const txDoc = await db().collection('pointTransactions').doc(`parent_grant_${key}`).get();
+    expect(txDoc.exists).toBe(true);
+    expect(txDoc.data()).toMatchObject({
+      delta: 0,
+      sourceType: 'parent_grant',
+      walletId: `${familyId}_cx1`,
+      childId: 'cx1',
+    });
+    // 小孩後來賺到 20 點
+    await call('px1', { childUserId: 'cx1', familyId, amount: 20, reason: '' });
+    // 同 key 重放 → 走冪等路徑（delta null），不真扣
+    const replay = await call('px1', {
+      childUserId: 'cx1',
+      familyId,
+      amount: -5,
+      reason: '',
+      idempotencyKey: key,
+    });
+    expect(replay.success).toBe(true);
+    expect(replay.delta).toBeNull();
+    const wallet = await db().collection('pointWallets').doc(`${familyId}_cx1`).get();
+    expect(wallet.data()?.balance).toBe(20);
+  });
+
+  it('CX-3 既有錢包餘額 0 扣點（帶 key）→ 同樣落冪等標記', async () => {
+    const familyId = 'fam-cx3-existing';
+    await seedParent('px2', familyId);
+    await seedChild('cx2', familyId, 'cx2');
+    await call('px2', { childUserId: 'cx2', familyId, amount: 10, reason: '' });
+    await call('px2', { childUserId: 'cx2', familyId, amount: -10, reason: '' }); // 餘額歸 0
+    const key = 'cx3-key-2';
+    const res = await call('px2', {
+      childUserId: 'cx2',
+      familyId,
+      amount: -5,
+      reason: '',
+      idempotencyKey: key,
+    });
+    expect(res).toMatchObject({ success: true, delta: 0 });
+    const txDoc = await db().collection('pointTransactions').doc(`parent_grant_${key}`).get();
+    expect(txDoc.exists).toBe(true);
+    expect(txDoc.data()?.delta).toBe(0);
+  });
+
+  it('CX-3 不帶 key 的 delta 0 → 不寫 tx doc（auto-id 無冪等價值，不留帳目噪音）', async () => {
+    const familyId = 'fam-cx3-nokey';
+    await seedParent('px3', familyId);
+    await seedChild('cx3', familyId, 'cx3');
+    await call('px3', { childUserId: 'cx3', familyId, amount: -5, reason: '' }); // 新錢包 clamp 0
+    const txs = await db().collection('pointTransactions').where('childId', '==', 'cx3').get();
+    expect(txs.size).toBe(0);
+  });
+
   it('不寫任何 auto-id 錢包（doc id 一律 {familyId}_{childId}）', async () => {
     const familyId = 'fam7';
     await seedParent('p7', familyId);
