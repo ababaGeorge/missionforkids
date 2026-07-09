@@ -23,6 +23,7 @@ import type {
 } from '../../../types/models';
 import { useFamily } from '../../../hooks/useFamily';
 import { resolveMemberDisplay } from '../../../lib/memberName';
+import { updateOrderIfPending, ORDER_STALE_MESSAGES } from '../../../lib/orders';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -548,32 +549,10 @@ function ReviewTaskSheet({
 }
 
 // =============================================================================
-// R2-04：家長核准/婉拒前的訂單狀態守衛
-// 小孩取消訂單時 CF 已把點數退還；若家長畫面殘留的 pending 卡片仍能裸 update
-// 成 approved/rejected，會變成「點數已退卻照樣領獎」。改用交易重讀：status
-// 仍是 pending 才寫入，否則拋錯誤碼，由 UI 顯示友善訊息並關閉 sheet 讓列表刷新。
+// R2-04：家長核准/婉拒前的訂單狀態守衛（R2-31 抽到 src/lib/orders.ts 與
+// rewards.tsx 共用，行為不變：前置狀態 {pending}，錯誤碼由
+// ORDER_STALE_MESSAGES 轉成友善訊息並關閉 sheet 讓列表刷新）。
 // =============================================================================
-const ORDER_STALE_MESSAGES: Record<string, string> = {
-  ORDER_GONE: '這筆兌換申請已經不存在了。',
-  ORDER_CANCELLED: '這筆兌換已被小孩取消，點數已退還，不用再處理囉。',
-  ORDER_ALREADY_HANDLED: '這筆兌換已經處理過了，不能重複處理。',
-};
-
-async function updateOrderIfPending(
-  orderId: string,
-  fields: Record<string, any>
-): Promise<void> {
-  const ref = firestore().collection('rewardOrders').doc(orderId);
-  await firestore().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error('ORDER_GONE');
-    const status = snap.data()?.status;
-    if (status !== 'pending') {
-      throw new Error(status === 'cancelled' ? 'ORDER_CANCELLED' : 'ORDER_ALREADY_HANDLED');
-    }
-    tx.update(ref, fields);
-  });
-}
 
 // =============================================================================
 // Redeem Confirm Sheet — spec 4.4
