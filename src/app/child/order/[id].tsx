@@ -46,27 +46,44 @@ export default function ChildOrderDetail() {
   const [order, setOrder] = useState<OrderDoc | null>(null);
   const [item, setItem] = useState<RewardItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!orderId) return;
     const unsub = firestore()
       .collection('rewardOrders')
       .doc(orderId)
-      .onSnapshot(async (snap) => {
-        if (!snap) return;
-        const data = snap.data();
-        if (!data) return;
-        const ord = { id: snap.id, ...data } as OrderDoc;
-        setOrder(ord);
-        if (!item || item.id !== ord.itemId) {
-          const itemDoc = await firestore()
-            .collection('rewardItems')
-            .doc(ord.itemId)
-            .get();
-          const iData = itemDoc.data();
-          if (iData) setItem({ id: itemDoc.id, ...iData } as RewardItem);
+      .onSnapshot(
+        async (snap) => {
+          if (!snap) return;
+          const data = snap.data();
+          if (!data) {
+            // R2-18：訂單不存在 → 給「找不到」出口，不再永久卡在載入畫面
+            setNotFound(true);
+            return;
+          }
+          const ord = { id: snap.id, ...data } as OrderDoc;
+          setOrder(ord);
+          if (!item || item.id !== ord.itemId) {
+            // R2-18：item get 失敗或 item 文件不存在也要有出口
+            try {
+              const itemDoc = await firestore()
+                .collection('rewardItems')
+                .doc(ord.itemId)
+                .get();
+              const iData = itemDoc.data();
+              if (iData) setItem({ id: itemDoc.id, ...iData } as RewardItem);
+              else setNotFound(true);
+            } catch {
+              setNotFound(true);
+            }
+          }
+        },
+        () => {
+          // R2-18：權限/網路錯誤也要有出口
+          setNotFound(true);
         }
-      });
+      );
     return unsub;
   }, [orderId]);
 
@@ -119,6 +136,20 @@ export default function ChildOrderDetail() {
       },
     ]);
   };
+
+  if (notFound) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <Starfield count={26} />
+        <View style={styles.notFoundWrap}>
+          <Muted>找不到這筆訂單</Muted>
+          <Pressable onPress={onClose} style={styles.closePill}>
+            <Body>回上一頁</Body>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!order || !item) {
     return (
@@ -283,6 +314,19 @@ export default function ChildOrderDetail() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: P.bg },
+  notFoundWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  closePill: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+  },
   topHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
