@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import type { PointWallet, TaskInstance } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
 import { childIdFor, walletDocId } from '../../../lib/childId';
+import { joinDurationLabel } from '../../../lib/joinDuration';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Display, Body, Label, Muted, Data } from '../../../design/Text';
@@ -110,11 +111,11 @@ export default function ChildMe() {
     return Math.floor((Date.now() - bd.getTime()) / (365.25 * 86400 * 1000));
   }, [user]);
 
-  const joinMonths = useMemo(() => {
+  const joinLabel = useMemo(() => {
     if (!user?.createdAt) return null;
     const c: any = user.createdAt;
     const d: Date = typeof c?.toDate === 'function' ? c.toDate() : new Date(c);
-    return Math.max(1, Math.round((Date.now() - d.getTime()) / (30 * 86400 * 1000)));
+    return joinDurationLabel(d);
   }, [user]);
 
   const firstChar = (user?.displayName || '你').charAt(0);
@@ -186,11 +187,11 @@ export default function ChildMe() {
           <Display style={{ fontSize: 24, marginTop: spacing.md }}>
             {user?.displayName || '小朋友'}
           </Display>
-          {(age != null || joinMonths != null) && (
+          {(age != null || joinLabel != null) && (
             <Muted style={{ fontSize: 12, marginTop: 2 }}>
               {age != null ? `${age} 歲` : ''}
-              {age != null && joinMonths != null ? ' · ' : ''}
-              {joinMonths != null ? `加入 ${joinMonths} 個月` : ''}
+              {age != null && joinLabel != null ? ' · ' : ''}
+              {joinLabel ?? ''}
             </Muted>
           )}
         </View>
