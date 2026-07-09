@@ -27,14 +27,21 @@ export async function resolveMemberUser(
   if (direct.exists()) {
     return { id: direct.id, ...direct.data() } as User;
   }
-  const q = await firestore()
-    .collection('users')
-    .where('authProviderId', '==', userId)
-    .limit(1)
-    .get();
-  if (!q.empty) {
-    const d = q.docs[0];
-    return { id: d.id, ...d.data() } as User;
+  // 加固後的 rules 只放行「查自己」的 authProviderId list（firestore.rules users 段），
+  // 舊資料（doc id ≠ auth uid）由家長代查會 permission-denied——吞掉回 null，
+  // 讓呼叫端走 fallback 顯示名，不沿 Promise.all 炸掉整頁。
+  try {
+    const q = await firestore()
+      .collection('users')
+      .where('authProviderId', '==', userId)
+      .limit(1)
+      .get();
+    if (!q.empty) {
+      const d = q.docs[0];
+      return { id: d.id, ...d.data() } as User;
+    }
+  } catch (e) {
+    console.warn('[memberName] resolveMemberUser fallback 查詢失敗', e);
   }
   return null;
 }

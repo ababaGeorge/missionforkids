@@ -98,7 +98,12 @@ export default function FamilyScreen() {
         for (const d of snap.docs) {
           const mem = { id: d.id, ...d.data() } as FamilyMembership;
           const u = await resolveMemberUser(mem.userId);
-          if (u) rows.push({ membership: mem, user: u });
+          // 舊資料在加固 rules 下可能查不到 user doc——退回 membership
+          // 暱稱顯示（nameOf 會補 '?'），不讓成員整列消失。
+          rows.push({
+            membership: mem,
+            user: u ?? ({ id: mem.userId, displayName: '' } as User),
+          });
         }
         setMembers(rows);
       });
