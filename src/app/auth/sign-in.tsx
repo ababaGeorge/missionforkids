@@ -120,6 +120,37 @@ export default function SignIn() {
     }
   };
 
+  // R2-32：忘記密碼最小流程。用 Firebase 內建自助重設（sendPasswordResetEmail），
+  // 不做家長代重設（專案決策）。user-not-found 沿用成功文案，避免帳號枚舉。
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailEmptyEmail'));
+      return;
+    }
+    try {
+      setLoading(true);
+      await auth().sendPasswordResetEmail(trimmedEmail);
+      Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailSent'));
+    } catch (e: any) {
+      switch (e?.code) {
+        case 'auth/user-not-found':
+          // 中性訊息：跟成功走同一文案，不透露帳號是否存在
+          Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailSent'));
+          break;
+        case 'auth/invalid-email':
+        case 'auth/too-many-requests':
+        case 'auth/network-request-failed':
+          Alert.alert(t('auth.forgotPassword'), mapAuthErrorMessage(e.code, false));
+          break;
+        default:
+          Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailFailed'));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // dev：把固定真帳號（seed 建立）填入欄位，走正式 email/密碼登入。
   // 只填欄位、不替身、不碰 firestore。__DEV__-gated。
   const fillDevAccount = (devEmail: string) => {
@@ -188,6 +219,13 @@ export default function SignIn() {
                     }}
                     style={styles.input}
                   />
+                  {authMode === 'signin' && (
+                    <Pressable testID="forgot-password" onPress={handleForgotPassword}>
+                      <BodySm style={{ color: P.muted, textAlign: 'right' }}>
+                        {t('auth.forgotPassword')}
+                      </BodySm>
+                    </Pressable>
+                  )}
                   {authMode === 'signup' && (
                     <>
                       <TextInput
