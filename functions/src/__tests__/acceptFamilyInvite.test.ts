@@ -203,6 +203,34 @@ describe('acceptFamilyInvite', () => {
     expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
   });
 
+  it('legacy 家長（doc id ≠ uid、authProviderId 匹配）接受 child 邀請 → ALREADY_PARENT，不遮蔽', async () => {
+    const uid = 'legacy-parent-auth-uid-1';
+    const db = admin.firestore();
+    // legacy 資料：doc id 不等於 auth uid，靠 authProviderId 對回本人
+    await db.collection('users').doc('legacy-parent-doc-1').set({
+      displayName: '老爸',
+      roleType: 'parent',
+      authProvider: 'password',
+      authProviderId: uid,
+      email: 'kid@example.com',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    await seedInvite('inv-10', 'fam-10');
+
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-10' },
+        auth: { uid, token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/ALREADY_PARENT/);
+
+    // 不得建立 users/{uid} 遮蔽 legacy parent doc；invite 也不應被消耗
+    const shadowDoc = await db.collection('users').doc(uid).get();
+    expect(shadowDoc.exists).toBe(false);
+    const invDoc = await db.collection('familyInvites').doc('inv-10').get();
+    expect(invDoc.data()!.status).toBe('pending');
+  });
+
   it('家長帳號接受 child 邀請 → failed-precondition ALREADY_PARENT，user doc 不被改寫', async () => {
     const uid = 'parent-uid-8';
     const db = admin.firestore();

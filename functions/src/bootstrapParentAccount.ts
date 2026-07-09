@@ -25,6 +25,17 @@ export const bootstrapParentAccount = onCall(async (request) => {
     if (userSnap.exists && userSnap.data()?.roleType === 'child') {
       throw new HttpsError('failed-precondition', 'ALREADY_CHILD');
     }
+    // legacy 帳號（doc id ≠ uid，靠 authProviderId 匹配——useAuth fallback 存在的理由）
+    // 讀 users/{uid} 讀不到，上方守衛會被跳過 → 補用 authProviderId 查一次。
+    // 此 read 在所有 write 之前，符合 transaction read-before-write 規則。
+    if (!userSnap.exists) {
+      const legacySnap = await tx.get(
+        db.collection('users').where('authProviderId', '==', uid).limit(1)
+      );
+      if (!legacySnap.empty && legacySnap.docs[0].data()?.roleType === 'child') {
+        throw new HttpsError('failed-precondition', 'ALREADY_CHILD');
+      }
+    }
     const familyRef = db.collection('families').doc();
     tx.set(userRef, { displayName, avatarUrl: null, authProvider: 'password', authProviderId: uid, roleType: 'parent', email, birthday: null, createdAt: now });
     tx.set(familyRef, { displayName: familyName, defaultGraceDays: 2, createdBy: uid, createdAt: now });

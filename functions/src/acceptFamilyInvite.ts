@@ -55,8 +55,21 @@ export const acceptFamilyInvite = onCall(async (request) => {
     const memSnap = await tx.get(memRef);
     const walletSnap = await tx.get(walletRef);
 
+    // legacy 帳號（doc id ≠ uid，靠 authProviderId 匹配——useAuth fallback 存在的理由）
+    // 讀 users/{uid} 讀不到，下方 ALREADY_PARENT 守衛會被跳過 → 補用 authProviderId 查一次。
+    // 此 read 在所有 write 之前，符合 transaction read-before-write 規則。
+    let legacyRoleType: string | null = null;
+    if (!userSnap.exists) {
+      const legacySnap = await tx.get(
+        db.collection('users').where('authProviderId', '==', uid).limit(1)
+      );
+      if (!legacySnap.empty) {
+        legacyRoleType = (legacySnap.docs[0].data()?.roleType as string | undefined) ?? null;
+      }
+    }
+
     // 既有家長不可因接受一張 child 邀請而被降級 / 洗掉 profile。
-    if (userSnap.exists && userSnap.data()?.roleType === 'parent') {
+    if ((userSnap.exists && userSnap.data()?.roleType === 'parent') || legacyRoleType === 'parent') {
       throw new HttpsError('failed-precondition', 'ALREADY_PARENT');
     }
 
