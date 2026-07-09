@@ -136,6 +136,30 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect(orderDoc?.balanceAfterSnapshot).toBeUndefined();
   });
 
+  // FIX-A：守衛收窄——家長核准搶在扣款 trigger 前（冷啟動 2-10 秒窗口）→ 照扣。
+  // 舊守衛「非 pending 一律跳過」會讓 approved 訂單永久跳過扣款 → 免費領獎、無帳可查。
+  it('訂單在 trigger 前已 approved → 照扣、寫快照欄位、寫 ledger（FIX-A）', async () => {
+    const familyId = 'f11';
+    await seedChildMembership('k11', familyId, 'k11');
+    await seedWallet(familyId, 'k11', 100);
+    await seedRewardItem('item-11', familyId, 30);
+    const order = { userId: 'k11', familyId, itemId: 'item-11', pointCostSnapshot: 30, status: 'pending' };
+    // doc 現況已被家長核准（trigger 收到的仍是建立當下的 pending snapshot）
+    await seedOrder('ord-11', { ...order, status: 'approved' });
+    await fireCreated('ord-11', order);
+
+    // 照扣 30
+    expect((await db().collection('pointWallets').doc(`${familyId}_k11`).get()).data()?.balance).toBe(70);
+    // ledger 有帳
+    const pt = await db().collection('pointTransactions').doc('reward_order_ord-11').get();
+    expect(pt.data()).toMatchObject({ walletId: `${familyId}_k11`, delta: -30, sourceType: 'reward_order' });
+    // 快照欄位照寫、status 維持 approved 不被改動
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-11').get()).data();
+    expect(orderDoc?.balanceBeforeSnapshot).toBe(100);
+    expect(orderDoc?.balanceAfterSnapshot).toBe(70);
+    expect(orderDoc?.status).toBe('approved');
+  });
+
   // R2-30：品項無效的 reject 路徑也要守衛——訂單已 cancelled 不得被蓋成 rejected。
   // （trigger 收到的是建立當下的 pending snapshot，但 doc 現況可能已被小孩取消。）
   it('訂單已 cancelled＋品項無效 → 維持 cancelled、不被蓋成 rejected（R2-30）', async () => {
