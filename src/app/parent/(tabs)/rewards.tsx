@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -73,6 +73,9 @@ export default function ParentRewards() {
   const [showCreate, setShowCreate] = useState(false);
   const [tab, setTab] = useState<'catalog' | 'log'>('catalog');
   const [editingItem, setEditingItem] = useState<RewardItem | null>(null);
+  // R2-09：世代守衛——async 組裝期間新快照到來時，舊組裝作廢不 setState，
+  // 避免慢的舊結果最後寫入蓋掉新資料。模式同 child notif/tasks。
+  const orderSnapGen = useRef(0);
 
   useEffect(() => {
     if (!uid) return;
@@ -112,6 +115,7 @@ export default function ParentRewards() {
       .limit(50)
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++orderSnapGen.current;
         const list: OrderWithChild[] = [];
         for (const d of snap.docs) {
           const order = { id: d.id, ...d.data() } as RewardOrder;
@@ -134,6 +138,7 @@ export default function ParentRewards() {
           } catch {}
           list.push({ order, itemTitle, childName });
         }
+        if (gen !== orderSnapGen.current) return;
         setOrders(list);
       }, (err) => {
         // A8：缺索引/權限錯誤不再被吞掉。沒有這個 callback 時 FAILED_PRECONDITION

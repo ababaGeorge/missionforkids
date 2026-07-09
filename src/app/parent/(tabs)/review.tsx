@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -105,6 +105,10 @@ export default function ParentReview() {
   const [reviewOrders, setReviewOrders] = useState<ReviewOrder[]>([]);
   const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
   const [activeOrder, setActiveOrder] = useState<ReviewOrder | null>(null);
+  // R2-09：世代守衛——async 組裝期間新快照到來時，舊組裝作廢不 setState，
+  // 避免慢的舊結果最後寫入蓋掉新資料（已審卡片回彈）。模式同 child notif/tasks。
+  const taskSnapGen = useRef(0);
+  const orderSnapGen = useRef(0);
 
   useEffect(() => {
     if (!family) return;
@@ -114,41 +118,48 @@ export default function ParentReview() {
       .where('status', '==', 'submitted')
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++taskSnapGen.current;
         const list: ReviewTask[] = [];
         for (const doc of snap.docs) {
-          const instance = { id: doc.id, ...doc.data() } as TaskInstance;
-          const subSnap = await firestore()
-            .collection('taskSubmissions')
-            .where('familyId', '==', family.id)
-            .where('taskInstanceId', '==', instance.id)
-            .orderBy('submittedAt', 'desc')
-            .limit(1)
-            .get();
-          if (subSnap.empty) continue;
-          const submission = {
-            id: subSnap.docs[0].id,
-            ...subSnap.docs[0].data(),
-          } as TaskSubmission;
-          const taskDoc = await firestore()
-            .collection('tasks')
-            .doc(instance.taskId)
-            .get();
-          const taskData = taskDoc.data();
-          const { name: childName } = await resolveMemberDisplay(
-            family.id,
-            instance.userId,
-            '小朋友'
-          );
-          list.push({
-            instance,
-            submission,
-            taskTitle: taskData?.title || '—',
-            taskPoints: taskData?.points || 0,
-            childName,
-          });
+          // R2-09：per-item 容錯——單筆內嵌讀取失敗只跳過該筆，其餘照常顯示
+          try {
+            const instance = { id: doc.id, ...doc.data() } as TaskInstance;
+            const subSnap = await firestore()
+              .collection('taskSubmissions')
+              .where('familyId', '==', family.id)
+              .where('taskInstanceId', '==', instance.id)
+              .orderBy('submittedAt', 'desc')
+              .limit(1)
+              .get();
+            if (subSnap.empty) continue;
+            const submission = {
+              id: subSnap.docs[0].id,
+              ...subSnap.docs[0].data(),
+            } as TaskSubmission;
+            const taskDoc = await firestore()
+              .collection('tasks')
+              .doc(instance.taskId)
+              .get();
+            const taskData = taskDoc.data();
+            const { name: childName } = await resolveMemberDisplay(
+              family.id,
+              instance.userId,
+              '小朋友'
+            );
+            list.push({
+              instance,
+              submission,
+              taskTitle: taskData?.title || '—',
+              taskPoints: taskData?.points || 0,
+              childName,
+            });
+          } catch (e) {
+            console.warn('[Review] skipping task', doc.id, (e as any)?.code);
+          }
         }
+        if (gen !== taskSnapGen.current) return;
         setReviewTasks(list);
-      });
+      }, (err) => console.error('[Review] tasks snapshot error:', (err as any)?.code));
     return unsub;
   }, [family?.id]);
 
@@ -160,29 +171,36 @@ export default function ParentReview() {
       .where('status', '==', 'pending')
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++orderSnapGen.current;
         const list: ReviewOrder[] = [];
         for (const doc of snap.docs) {
-          const order = { id: doc.id, ...doc.data() } as RewardOrder;
-          const itemDoc = await firestore()
-            .collection('rewardItems')
-            .doc(order.itemId)
-            .get();
-          const itemData = itemDoc.data();
-          const { name: childName } = await resolveMemberDisplay(
-            family.id,
-            order.userId,
-            '小朋友'
-          );
-          list.push({
-            order,
-            item: itemData
-              ? ({ id: itemDoc.id, ...itemData } as RewardItem)
-              : null,
-            childName,
-          });
+          // R2-09：per-item 容錯——單筆內嵌讀取失敗只跳過該筆，其餘照常顯示
+          try {
+            const order = { id: doc.id, ...doc.data() } as RewardOrder;
+            const itemDoc = await firestore()
+              .collection('rewardItems')
+              .doc(order.itemId)
+              .get();
+            const itemData = itemDoc.data();
+            const { name: childName } = await resolveMemberDisplay(
+              family.id,
+              order.userId,
+              '小朋友'
+            );
+            list.push({
+              order,
+              item: itemData
+                ? ({ id: itemDoc.id, ...itemData } as RewardItem)
+                : null,
+              childName,
+            });
+          } catch (e) {
+            console.warn('[Review] skipping order', doc.id, (e as any)?.code);
+          }
         }
+        if (gen !== orderSnapGen.current) return;
         setReviewOrders(list);
-      });
+      }, (err) => console.error('[Review] orders snapshot error:', (err as any)?.code));
     return unsub;
   }, [family?.id]);
 
