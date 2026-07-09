@@ -293,15 +293,21 @@ export default function ChildMe() {
               </Pressable>
             </View>
             <View style={styles.settingsList}>
-              <View style={styles.settingsRow}>
+              <Pressable
+                onPress={() => Alert.alert('語言', '尚未開放')}
+                style={styles.settingsRow}
+              >
                 <Label style={styles.settingsLabel}>語言</Label>
                 <Muted style={styles.settingsValue}>中文 / English</Muted>
-              </View>
+              </Pressable>
               <View style={styles.settingsDivider} />
-              <View style={styles.settingsRow}>
+              <Pressable
+                onPress={() => Alert.alert('家長協助', '尚未開放')}
+                style={styles.settingsRow}
+              >
                 <Label style={styles.settingsLabel}>家長協助</Label>
                 <Muted style={styles.settingsValue}>→</Muted>
-              </View>
+              </Pressable>
               <View style={styles.settingsDivider} />
               <Pressable
                 onPress={() => {
