@@ -31,14 +31,16 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
 
     const orderId = event.data!.after.id;
 
-    await db().runTransaction(async (tx) => {
+    // R2-30：交易回傳「是否真的退款」，skip 分支不再印 refunded（避免 log 說謊）。
+    // log 留在交易外，交易 retry 時才不會重複印。
+    const refunded = await db().runTransaction(async (tx) => {
       // --- reads（全部在 write 之前）---
       // 原始扣款 transaction（確定性 id）→ 帳本權威，提供 walletId
       const deductionRef = db().collection('pointTransactions').doc(`reward_order_${orderId}`);
       const deductionSnap = await tx.get(deductionRef);
       if (!deductionSnap.exists) {
         logger.info('No deduction found, skipping refund', { orderId });
-        return;
+        return false;
       }
       const deduction = deductionSnap.data()!;
       const walletId = deduction.walletId as string;
@@ -49,7 +51,7 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
       const refundSnap = await tx.get(refundRef);
       if (refundSnap.exists) {
         logger.info('Refund already exists, skipping', { orderId });
-        return;
+        return false;
       }
 
       // 退回原扣款錢包（doc id 直取，不重算 childId）
@@ -57,7 +59,7 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
       const walletSnap = await tx.get(walletRef);
       if (!walletSnap.exists) {
         logger.error('Original wallet not found for refund', { orderId, walletId });
-        return;
+        return false;
       }
 
       // --- writes ---
@@ -75,8 +77,11 @@ export const onRewardOrderCancelledOrRejected = onDocumentUpdated(
         note: null,
         createdAt: FieldValue.serverTimestamp(),
       });
+      return true;
     });
 
-    logger.info('Reward order refunded', { orderId });
+    if (refunded) {
+      logger.info('Reward order refunded', { orderId });
+    }
   }
 );

@@ -136,6 +136,22 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect(orderDoc?.balanceAfterSnapshot).toBeUndefined();
   });
 
+  // R2-30：品項無效的 reject 路徑也要守衛——訂單已 cancelled 不得被蓋成 rejected。
+  // （trigger 收到的是建立當下的 pending snapshot，但 doc 現況可能已被小孩取消。）
+  it('訂單已 cancelled＋品項無效 → 維持 cancelled、不被蓋成 rejected（R2-30）', async () => {
+    const familyId = 'f8';
+    await seedChildMembership('k8', familyId, 'k8');
+    await seedWallet(familyId, 'k8', 100);
+    // 不 seed item（品項無效）
+    const order = { userId: 'k8', familyId, itemId: 'ghost-item-8', pointCostSnapshot: 20, status: 'pending' };
+    await seedOrder('ord-8', { ...order, status: 'cancelled' }); // doc 現況已 cancelled
+    await fireCreated('ord-8', order);
+
+    expect((await db().collection('rewardOrders').doc('ord-8').get()).data()?.status).toBe('cancelled');
+    expect((await db().collection('pointWallets').doc(`${familyId}_k8`).get()).data()?.balance).toBe(100);
+    expect((await db().collection('pointTransactions').doc('reward_order_ord-8').get()).exists).toBe(false);
+  });
+
   it('rewardItems 已封存（archived）→ reject、不扣點（A2）', async () => {
     const familyId = 'f6';
     await seedChildMembership('k6', familyId, 'k6');

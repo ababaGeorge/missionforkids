@@ -7,6 +7,24 @@ import { isValidPointsValue } from './lib/points';
 
 const db = admin.firestore;
 
+type DocumentReference = admin.firestore.DocumentReference;
+
+/**
+ * R2-30：reject 寫入前在交易內重讀現況（與 R2-03 扣點守衛同模式）。
+ * trigger 收到的是建立當下的 pending snapshot，但 doc 現況可能已被取消——
+ * 只有仍是 pending 才寫 rejected，否則保持現狀並 log skip。
+ */
+async function rejectOrderIfPending(orderRef: DocumentReference, orderId: string): Promise<void> {
+  await db().runTransaction(async (tx) => {
+    const cur = await tx.get(orderRef);
+    if (!cur.exists || cur.data()?.status !== 'pending') {
+      logger.info('Order no longer pending, skipping reject', { orderId, status: cur.data()?.status });
+      return;
+    }
+    tx.update(orderRef, { status: 'rejected' });
+  });
+}
+
 /**
  * 孩子建立 rewardOrder 時，從確定性錢包 {familyId}_{childId} 扣點。
  * childId 由 server 從 membership 重新解析（不信任 doc 上 client 寫的 childId）。
@@ -34,13 +52,13 @@ export const onRewardOrderCreated = onDocumentCreated(
       if (item.status !== 'active') throw new Error('reward item not active');
       authoritativeCost = item.pointCost;
     } catch (e) {
-      await snap.ref.update({ status: 'rejected' });
+      await rejectOrderIfPending(snap.ref, orderId);
       logger.warn('reward item invalid, rejecting order', { orderId, itemId, err: String(e) });
       return;
     }
 
     if (!isValidPointsValue(authoritativeCost) || authoritativeCost <= 0) {
-      await snap.ref.update({ status: 'rejected' });
+      await rejectOrderIfPending(snap.ref, orderId);
       logger.warn('authoritative cost malformed, rejecting order', { orderId, authoritativeCost });
       return;
     }
@@ -49,7 +67,7 @@ export const onRewardOrderCreated = onDocumentCreated(
     try {
       childId = await resolveAuthoritativeChildId(db(), familyId, userId);
     } catch (e) {
-      await snap.ref.update({ status: 'rejected' });
+      await rejectOrderIfPending(snap.ref, orderId);
       logger.error('resolveAuthoritativeChildId failed, rejecting order', { orderId, err: String(e) });
       return;
     }
