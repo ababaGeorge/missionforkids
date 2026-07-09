@@ -121,7 +121,9 @@ export default function ChildTasks() {
               .doc(instance.taskId)
               .get();
             const taskData = taskDoc.data();
-            if (taskData) {
+            // 家長刪任務是 soft delete（status='archived'）：archived 的任務不進清單，
+            // 避免刪了還看得到、還能提交。
+            if (taskData && taskData.status !== 'archived') {
               next.push({
                 task: { id: taskDoc.id, ...taskData } as Task & { emoji?: string },
                 instance,
