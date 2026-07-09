@@ -162,7 +162,7 @@ export default function FamilyScreen() {
     setGranting(true);
     try {
       const fn = functions().httpsCallable('grantPoints');
-      await fn({
+      const res = await fn({
         childUserId: grantTarget.userId,
         familyId: family.id,
         amount: signed,
@@ -171,9 +171,15 @@ export default function FamilyScreen() {
           (grantMode === 'deduct' ? '爸媽扣點' : '爸媽直接給'),
         idempotencyKey,
       });
+      // server 回傳實際變動量 delta（扣點超過餘額會被 clamp）；冪等重放拿不到 → fallback 用請求值
+      const delta = (res.data as { delta?: number | null })?.delta ?? null;
+      const shown = delta ?? signed;
+      const adjusted = delta != null && delta !== signed;
       Alert.alert(
         '',
-        `${signed > 0 ? '+' : ''}${signed} ★ → ${grantTarget.name}`
+        `${shown > 0 ? '+' : ''}${shown} ★ → ${grantTarget.name}${
+          adjusted ? '（已依餘額調整）' : ''
+        }`
       );
       setShowGrant(false);
       setGrantAmount('10');

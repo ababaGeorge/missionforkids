@@ -136,6 +136,52 @@ describe('grantPoints (childId 重構)', () => {
     expect(wallets.size).toBe(0);
   });
 
+  it('回傳 delta：正常給 10 → delta === 10', async () => {
+    const familyId = 'fam-delta-give';
+    await seedParent('pd1', familyId);
+    await seedChild('cd1', familyId, 'cd1');
+    const res = await call('pd1', { childUserId: 'cd1', familyId, amount: 10, reason: '' });
+    expect(res).toMatchObject({ success: true, delta: 10 });
+  });
+
+  it('回傳 delta：餘額 40 扣 999 → delta === -40（clamp 後實際扣除值）', async () => {
+    const familyId = 'fam-delta-clamp';
+    await seedParent('pd2', familyId);
+    await seedChild('cd2', familyId, 'cd2');
+    await call('pd2', { childUserId: 'cd2', familyId, amount: 40, reason: '' });
+    const res = await call('pd2', { childUserId: 'cd2', familyId, amount: -999, reason: '' });
+    expect(res.success).toBe(true);
+    expect(res.delta).toBe(-40);
+    const wallet = await db().collection('pointWallets').doc(`${familyId}_cd2`).get();
+    expect(wallet.data()?.balance).toBe(0);
+  });
+
+  it('同 idempotencyKey 重放 → success true 且 delta null，餘額不重複變動', async () => {
+    const familyId = 'fam-delta-idem';
+    await seedParent('pd3', familyId);
+    await seedChild('cd3', familyId, 'cd3');
+    const key = 'replay-key-1';
+    const first = await call('pd3', {
+      childUserId: 'cd3',
+      familyId,
+      amount: 10,
+      reason: '',
+      idempotencyKey: key,
+    });
+    expect(first).toMatchObject({ success: true, delta: 10 });
+    const replay = await call('pd3', {
+      childUserId: 'cd3',
+      familyId,
+      amount: 10,
+      reason: '',
+      idempotencyKey: key,
+    });
+    expect(replay.success).toBe(true);
+    expect(replay.delta).toBeNull();
+    const wallet = await db().collection('pointWallets').doc(`${familyId}_cd3`).get();
+    expect(wallet.data()?.balance).toBe(10);
+  });
+
   it('不寫任何 auto-id 錢包（doc id 一律 {familyId}_{childId}）', async () => {
     const familyId = 'fam7';
     await seedParent('p7', familyId);

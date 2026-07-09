@@ -67,15 +67,17 @@ export const grantPoints = onCall(async (request) => {
     throw new HttpsError('not-found', 'Child is not a member of this family');
   }
 
-  // Atomic transaction: 找或建確定性錢包 + 寫 transaction
-  await db.runTransaction(async (tx) => {
+  // Atomic transaction: 找或建確定性錢包 + 寫 transaction。
+  // 回傳實際變動量 delta（扣點被 clamp 時 |delta| < |amount|），供 client 顯示真實扣除值；
+  // 冪等重放（已處理過）拿不到當次 delta → 回 null，client 端 fallback 用請求值。
+  const delta = await db.runTransaction<number | null>(async (tx) => {
     // A9 冪等：有 idempotencyKey 時用確定性 tx doc id，重送/連點同一 key 不重複發點。
     const txRef = idempotencyKey
       ? db.collection('pointTransactions').doc(`parent_grant_${idempotencyKey}`)
       : db.collection('pointTransactions').doc();
     if (idempotencyKey) {
       const existing = await tx.get(txRef); // 讀必須在任何 write 之前
-      if (existing.exists) return; // 已處理過，直接結束
+      if (existing.exists) return null; // 已處理過，直接結束
     }
 
     // tx.get 在任何 write 之前
@@ -113,7 +115,9 @@ export const grantPoints = onCall(async (request) => {
         createdAt: FieldValue.serverTimestamp(),
       });
     }
+
+    return delta;
   });
 
-  return { success: true };
+  return { success: true, delta };
 });
