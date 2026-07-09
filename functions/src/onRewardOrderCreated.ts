@@ -60,6 +60,14 @@ export const onRewardOrderCreated = onDocumentCreated(
       const ptSnap = await tx.get(ptRef);
       if (ptSnap.exists) return; // 已扣過（重放保護）
 
+      // R2-03 競態守衛：訂單若在本 trigger 執行前已被取消/拒絕，退款 trigger 會因
+      // 「找不到扣款紀錄」跳過退款——此時若照扣，點數永久遺失。交易內重讀現況，非 pending 不扣。
+      const orderSnap = await tx.get(snap.ref);
+      if (!orderSnap.exists || orderSnap.data()?.status !== 'pending') {
+        logger.info('Order no longer pending, skipping deduction', { orderId, status: orderSnap.data()?.status });
+        return;
+      }
+
       const wallet = await resolveChildWallet(tx, db(), familyId, childId);
 
       // --- writes ---

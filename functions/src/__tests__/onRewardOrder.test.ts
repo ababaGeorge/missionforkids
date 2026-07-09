@@ -117,6 +117,25 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect((await db().collection('pointWallets').doc(`${familyId}_k5`).get()).data()?.balance).toBe(100);
   });
 
+  // R2-03 競態守衛：訂單在 trigger 執行前已被取消 → 不扣點。
+  // 否則退款 trigger 因找不到扣款紀錄跳過退款，扣款 trigger 稍後照扣 → 點數遺失無帳可對。
+  it('訂單在 trigger 前已 cancelled → 不扣點、不寫 pointTransaction、不寫快照欄位（R2-03）', async () => {
+    const familyId = 'f7';
+    await seedChildMembership('k7', familyId, 'k7');
+    await seedWallet(familyId, 'k7', 100);
+    await seedRewardItem('item-7', familyId, 20);
+    const order = { userId: 'k7', familyId, itemId: 'item-7', pointCostSnapshot: 20, status: 'pending' };
+    // doc 現況已是 cancelled（trigger 收到的仍是建立當下的 pending snapshot）
+    await seedOrder('ord-7', { ...order, status: 'cancelled' });
+    await fireCreated('ord-7', order);
+
+    expect((await db().collection('pointWallets').doc(`${familyId}_k7`).get()).data()?.balance).toBe(100);
+    expect((await db().collection('pointTransactions').doc('reward_order_ord-7').get()).exists).toBe(false);
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-7').get()).data();
+    expect(orderDoc?.balanceBeforeSnapshot).toBeUndefined();
+    expect(orderDoc?.balanceAfterSnapshot).toBeUndefined();
+  });
+
   it('rewardItems 已封存（archived）→ reject、不扣點（A2）', async () => {
     const familyId = 'f6';
     await seedChildMembership('k6', familyId, 'k6');
