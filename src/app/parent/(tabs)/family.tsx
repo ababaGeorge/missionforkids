@@ -180,12 +180,17 @@ export default function FamilyScreen() {
       const delta = (res.data as { delta?: number | null })?.delta ?? null;
       const shown = delta ?? signed;
       const adjusted = delta != null && delta !== signed;
-      Alert.alert(
-        '',
-        `${shown > 0 ? '+' : ''}${shown} ★ → ${grantTarget.name}${
-          adjusted ? '（已依餘額調整）' : ''
-        }`
-      );
+      if (delta === 0) {
+        // 扣點被 clamp 到 0（餘額已是 0）→ 給明確說明，不用「已依餘額調整」帶過
+        Alert.alert('', `${grantTarget.name} 的餘額已是 0，這次沒有扣點`);
+      } else {
+        Alert.alert(
+          '',
+          `${shown > 0 ? '+' : ''}${shown} ★ → ${grantTarget.name}${
+            adjusted ? '（已依餘額調整）' : ''
+          }`
+        );
+      }
       setShowGrant(false);
       setGrantAmount('10');
       setGrantReason('');

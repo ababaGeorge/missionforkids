@@ -96,8 +96,14 @@ async function main() {
   const G = makeClient('guest'); // 未登入訪客（邀請 pre-auth 讀取用）
   connectFirestoreEmulator(G.db, FS_HOST.split(':')[0], Number(FS_HOST.split(':')[1]));
 
-  const dadEmail = 'e2e-dad@mfk.test';
-  const kidEmail = 'e2e-kid@mfk.test';
+  // email／冪等鍵加時間戳後綴：常駐 emulator 重跑不會撞 email-already-in-use、
+  // 也不會被 grantPoints 當上一輪的冪等重放（server 端 tx doc id = parent_grant_${key}，全域）
+  const runTag = Date.now();
+  const dadEmail = `e2e-dad-${runTag}@mfk.test`;
+  const kidEmail = `e2e-kid-${runTag}@mfk.test`;
+  const idemKey1 = `e2e-key-1-${runTag}`;
+  const idemKey2 = `e2e-key-2-${runTag}`;
+  const idemKey3 = `e2e-key-3-${runTag}`;
   let dadUid, kidUid, familyId, inviteId, childId;
   let taskId, instanceId, itemId, item2Id, orderId, order2Id, order3Id;
 
@@ -352,7 +358,7 @@ async function main() {
   // ========== 9. grantPoints（冪等 + clamp + 回傳 delta，R2-13）==========
   await step('9.1 grantPoints +30（帶冪等鍵）→ 回傳 delta=30', async () => {
     const fn = httpsCallable(P.fns, 'grantPoints');
-    const res = await fn({ childUserId: kidUid, familyId, amount: 30, reason: 'E2E', idempotencyKey: 'e2e-key-1' });
+    const res = await fn({ childUserId: kidUid, familyId, amount: 30, reason: 'E2E', idempotencyKey: idemKey1 });
     if (res.data.delta !== 30) throw new Error(`delta=${res.data.delta} != 30`);
   });
   await waitFor('9.2 錢包 50 → 80', async () => {
@@ -361,7 +367,7 @@ async function main() {
   });
   await step('9.3 同冪等鍵重送不重複入帳（重放回 delta=null）', async () => {
     const fn = httpsCallable(P.fns, 'grantPoints');
-    const res = await fn({ childUserId: kidUid, familyId, amount: 30, reason: 'E2E', idempotencyKey: 'e2e-key-1' });
+    const res = await fn({ childUserId: kidUid, familyId, amount: 30, reason: 'E2E', idempotencyKey: idemKey1 });
     if (res.data.delta !== null) throw new Error(`重放 delta=${res.data.delta} != null`);
     await sleep(1500);
     const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
@@ -369,7 +375,7 @@ async function main() {
   });
   await step('9.4 扣點 clamp 到 0（-1000）→ 回傳實際變動 delta=-80（R2-13）', async () => {
     const fn = httpsCallable(P.fns, 'grantPoints');
-    const res = await fn({ childUserId: kidUid, familyId, amount: -1000, reason: 'E2E', idempotencyKey: 'e2e-key-2' });
+    const res = await fn({ childUserId: kidUid, familyId, amount: -1000, reason: 'E2E', idempotencyKey: idemKey2 });
     if (res.data.delta !== -80) throw new Error(`delta=${res.data.delta} != -80`);
     await sleep(1500);
     const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
@@ -520,7 +526,7 @@ async function main() {
   // ========== 15. R2-03：扣款-取消競態不遺失點數（trigger 交易內重讀對帳）==========
   await step('15.1 grantPoints +100 備妥測試餘額（20 → 120）', async () => {
     const fn = httpsCallable(P.fns, 'grantPoints');
-    const res = await fn({ childUserId: kidUid, familyId, amount: 100, reason: 'E2E race', idempotencyKey: 'e2e-key-3' });
+    const res = await fn({ childUserId: kidUid, familyId, amount: 100, reason: 'E2E race', idempotencyKey: idemKey3 });
     if (res.data.delta !== 100) throw new Error(`delta=${res.data.delta} != 100`);
     const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
     if (w.data().balance !== 120) throw new Error(`餘額 ${w.data().balance} != 120`);

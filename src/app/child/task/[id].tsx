@@ -82,6 +82,8 @@ export default function ChildTaskDetail() {
           }
           const inst = { id: snap.id, ...data } as InstanceDoc;
           setInstance(inst);
+          // 快照成功 → 清掉先前暫時性失敗留下的 notFound，讓畫面自癒
+          setNotFound(false);
           if (!task || task.id !== inst.taskId) {
             // R2-18：task get 失敗或 task 文件不存在 → 給「找不到」出口，不再永久轉圈
             try {
@@ -92,6 +94,7 @@ export default function ChildTaskDetail() {
               const tData = taskDoc.data();
               if (tData) {
                 setTask({ id: taskDoc.id, ...tData } as Task & { emoji?: string });
+                setNotFound(false);
               } else {
                 setNotFound(true);
               }

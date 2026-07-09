@@ -64,6 +64,8 @@ export default function ChildOrderDetail() {
           }
           const ord = { id: snap.id, ...data } as OrderDoc;
           setOrder(ord);
+          // 快照成功 → 清掉先前暫時性失敗留下的 notFound，讓畫面自癒
+          setNotFound(false);
           if (!item || item.id !== ord.itemId) {
             // R2-18：item get 失敗或 item 文件不存在也要有出口
             try {
@@ -72,8 +74,10 @@ export default function ChildOrderDetail() {
                 .doc(ord.itemId)
                 .get();
               const iData = itemDoc.data();
-              if (iData) setItem({ id: itemDoc.id, ...iData } as RewardItem);
-              else setNotFound(true);
+              if (iData) {
+                setItem({ id: itemDoc.id, ...iData } as RewardItem);
+                setNotFound(false);
+              } else setNotFound(true);
             } catch (e) {
               // R2-21(R2-18 審查)：dev 下留錯誤線索，避免只看到「找不到」無從除錯
               if (__DEV__) console.warn('[ChildOrderDetail] item 讀取失敗:', e);

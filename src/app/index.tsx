@@ -47,6 +47,9 @@ export default function Index() {
           <Muted style={{ textAlign: 'center', marginTop: 6, fontSize: 12 }}>
             可能是網路不穩，重新登入通常就能修好。
           </Muted>
+          <Muted style={{ textAlign: 'center', marginTop: 4, fontSize: 12 }}>
+            若您註冊時中斷，請回註冊頁用同一組 Email 和密碼再送出一次即可修復。
+          </Muted>
           <Pressable
             testID="stuck-relogin"
             onPress={async () => {
