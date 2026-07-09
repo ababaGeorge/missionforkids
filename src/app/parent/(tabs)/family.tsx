@@ -394,8 +394,10 @@ export default function FamilyScreen() {
         onPress={() => setShowInviteEmail(true)}
         style={styles.fab}
         hitSlop={10}
+        accessibilityLabel="邀請小孩"
       >
         <Body style={{ color: P.bg, fontSize: 26, fontWeight: '800' }}>+</Body>
+        <Body style={{ color: P.bg, fontSize: 15, fontWeight: '800' }}>邀請小孩</Body>
       </Pressable>
 
       {renderCreateFamilyModal()}
@@ -756,12 +758,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 18,
     bottom: 92,
-    width: 56,
     height: 56,
-    borderRadius: 28,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.full,
     backgroundColor: P.primary,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     shadowColor: '#000',
     shadowOpacity: 0.35,
     shadowRadius: 24,
