@@ -405,7 +405,8 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   errorText: {
-    color: '#FF6B6B',
+    // R2-21(P7)：literal #FF6B6B 改用 tokens 內最接近的警示色（accentHot #FF6B47）
+    color: P.accentHot,
     fontSize: 13,
   },
   appleButton: {

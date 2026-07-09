@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -255,7 +255,8 @@ export default function ParentTasks() {
         <View style={styles.header}>
           <Label color={P.muted}>任務</Label>
           <Display style={{ marginTop: 2 }}>
-            {tab === 'manage' ? `${activeCount} 個任務在跑` : '過去 7 天'}
+            {/* R2-21(R2-08 審查)：歷程列的是全部審核紀錄，不是七天視窗，標題改成相符文字 */}
+            {tab === 'manage' ? `${activeCount} 個任務在跑` : '完成歷程'}
           </Display>
 
           <View style={styles.segment}>
@@ -519,7 +520,10 @@ function CreateTaskModal({
   // assignee userId → 永久 childId（點數釘 childId）；找不到退回 userId
   const childIdOf = (assigneeUserId: string) =>
     children.find((c) => c.id === assigneeUserId)?.childId ?? assigneeUserId;
-  const [saving, setSaving] = useState(false); // 防連點：多筆網路寫入期間鎖住送出
+  const [saving, setSaving] = useState(false); // 防連點：多筆網路寫入期間鎖住送出（UI 顯示用）
+  // R2-21(P2)：state 更新是非同步的，快速連點兩下可能都讀到 saving=false 而雙重送出；
+  // 用 ref 同步上鎖封死這個縫隙（saving state 仍保留給按鈕文字/disabled 顯示）。
+  const savingRef = useRef(false);
   const [form, setForm] = useState({
     title: '',
     points: '10',
@@ -646,7 +650,7 @@ function CreateTaskModal({
 
   const handleCreate = async () => {
     if (!familyId || !uid || !form.title.trim()) return;
-    if (saving) return; // 防連點：避免重複建立任務與重複 instances
+    if (savingRef.current) return; // 防連點：避免重複建立任務與重複 instances（同步鎖，見 savingRef 註解）
     // 「自動指派第一個孩子」的 fallback 只給新增模式用。編輯模式不能有：
     // missed 不預選（見 assignedUserIds），全 missed 任務開編輯時選擇是空的，
     // fallback 會在「只改標題」時偷偷復活 missed instance、甚至把任務改派給
@@ -670,6 +674,14 @@ function CreateTaskModal({
       // 原本就沒有指派中的孩子（全 missed）→ 視為維持現狀：
       // 只更新任務欄位，不動指派（下方 planAssignmentChanges 對空 assignees + 全 missed 產出空計畫）
     }
+    // R2-21(R2-17 審查)：點數最後防線——parseInt 後 NaN（清空欄位）或 <1 一律擋下，
+    // 負數/零點數不得寫進 Firestore（輸入端已限純數字，這裡防貼上/程式化輸入）。
+    const points = parseInt(form.points, 10);
+    if (!Number.isFinite(points) || points < 1) {
+      Alert.alert('錯誤', '點數請填 1 以上的整數');
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     try {
       const now = firestore.Timestamp.now();
@@ -692,7 +704,7 @@ function CreateTaskModal({
         // 更新 task 欄位 + 對帳 instances（加/移除指派的孩子）
         await firestore().collection('tasks').doc(editing.task.id).update({
           title: form.title.trim(),
-          points: parseInt(form.points) || 10,
+          points,
           frequency: form.frequency,
           dueDate,
           graceDays,
@@ -763,10 +775,15 @@ function CreateTaskModal({
       const gracePeriodEnd = firestore.Timestamp.fromDate(
         new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
       );
-      const taskRef = await firestore().collection('tasks').add({
+      // R2-21(P2)：任務＋instances 用單一 batch 原子提交。原本先 add task 再逐筆
+      // await add instance，tasks 訂閱先收到新任務時卡片會短暫閃 0/0（自癒但閃現）；
+      // 中途失敗還會留下沒有任何 instance 的孤兒任務。batch 讓兩者同時落地。
+      const taskRef = firestore().collection('tasks').doc();
+      const batch = firestore().batch();
+      batch.set(taskRef, {
         familyId,
         title: form.title.trim(),
-        points: parseInt(form.points) || 10,
+        points,
         frequency: form.frequency,
         startDate: now,
         dueDate,
@@ -779,7 +796,7 @@ function CreateTaskModal({
         createdAt: now,
       });
       for (const childId of assignees) {
-        await firestore().collection('taskInstances').add({
+        batch.set(firestore().collection('taskInstances').doc(), {
           taskId: taskRef.id,
           userId: childId,
           childId: childIdOf(childId),
@@ -794,6 +811,7 @@ function CreateTaskModal({
           pointsAwarded: null,
         });
       }
+      await batch.commit();
       setForm({
         title: '',
         points: '10',
@@ -809,6 +827,7 @@ function CreateTaskModal({
     } catch (e: any) {
       Alert.alert(editing ? '儲存失敗' : '建立失敗', e?.message || '不明錯誤');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -874,8 +893,13 @@ function CreateTaskModal({
                   placeholder="10"
                   placeholderTextColor={P.muted}
                   value={form.points}
-                  onChangeText={(points) => setForm((s) => ({ ...s, points }))}
+                  onChangeText={(v) => {
+                    // R2-21(R2-17 審查)：只留數字——擋負號/小數點/貼上的非數字（同 dueDays 慣例）
+                    const points = v.replace(/[^0-9]/g, '');
+                    setForm((s) => ({ ...s, points }));
+                  }}
                   keyboardType="numeric"
+                  maxLength={4}
                 />
 
                 <Label color={P.muted} style={{ marginTop: spacing.md }}>

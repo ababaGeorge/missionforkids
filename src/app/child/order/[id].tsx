@@ -74,13 +74,16 @@ export default function ChildOrderDetail() {
               const iData = itemDoc.data();
               if (iData) setItem({ id: itemDoc.id, ...iData } as RewardItem);
               else setNotFound(true);
-            } catch {
+            } catch (e) {
+              // R2-21(R2-18 審查)：dev 下留錯誤線索，避免只看到「找不到」無從除錯
+              if (__DEV__) console.warn('[ChildOrderDetail] item 讀取失敗:', e);
               setNotFound(true);
             }
           }
         },
-        () => {
+        (err) => {
           // R2-18：權限/網路錯誤也要有出口
+          if (__DEV__) console.warn('[ChildOrderDetail] order snapshot 錯誤:', err);
           setNotFound(true);
         }
       );

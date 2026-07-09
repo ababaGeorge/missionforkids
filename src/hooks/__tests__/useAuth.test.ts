@@ -134,6 +134,39 @@ describe('useAuth（onSnapshot 監聽＋世代守衛）', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  // R2-21(R2-06 審查)：補「過期 fallback 查到 user」的鏡像案例——上面測的是過期「空」
+  // 結果不得蓋回 null，這裡測過期「非空」結果也不得把較新的 direct-doc user 蓋成舊資料。
+  it('同世代競態：過期 fallback 查到 user → 不得蓋掉較新的 direct-doc user', async () => {
+    let resolveQuery!: (v: { empty: boolean; docs: any[] }) => void;
+    mockFsEnv.queryGet.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveQuery = resolve; })
+    );
+    const { result } = renderHook(() => useAuth());
+    await act(async () => { mockAuthEnv.callback!({ uid: 'u1' }); });
+    const listener = mockFsEnv.listeners['u1'][0];
+
+    // 第一次 snapshot：doc 空 → onNext 掛在 await fallback 查詢上
+    let firstOnNext!: Promise<void>;
+    await act(async () => {
+      firstOnNext = Promise.resolve(listener.onNext(docSnap('u1', null)));
+    });
+
+    // CF 補建 doc → 第二次 snapshot 設好較新的 user
+    await act(async () => { await listener.onNext(docSnap('u1', { roleType: 'parent' })); });
+    expect(result.current.user).toMatchObject({ id: 'u1', roleType: 'parent' });
+
+    // 過期 fallback 這時才回來，而且查到舊 legacy doc（非空）→ 仍必須作廢
+    await act(async () => {
+      resolveQuery({
+        empty: false,
+        docs: [{ id: 'child-legacy', data: () => ({ roleType: 'child' }) }],
+      });
+      await firstOnNext;
+    });
+    expect(result.current.user).toMatchObject({ id: 'u1', roleType: 'parent' });
+    expect(result.current.loading).toBe(false);
+  });
+
   it('世代守衛：換帳號後，舊帳號遲到的 snapshot 不污染新 state', async () => {
     const { result } = renderHook(() => useAuth());
     await act(async () => { mockAuthEnv.callback!({ uid: 'u1' }); });

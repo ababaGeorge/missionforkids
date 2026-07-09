@@ -76,6 +76,51 @@ describe('registerParent', () => {
     expect((functions as any).__mocks.httpsCallable).not.toHaveBeenCalled();
   });
 
+  // R2-21(R2-05 審查)：角色衝突是永久性錯誤，裝置不得默默停留在已登入的小孩帳號
+  it('CF 拋 ALREADY_CHILD → 先登出再拋錯，不殘留錯誤角色 session', async () => {
+    const createUser = (auth as any).__mocks.createUserWithEmailAndPassword;
+    const signIn = (auth as any).__mocks.signInWithEmailAndPassword;
+    const signOut = (auth as any).__mocks.signOut;
+    createUser.mockRejectedValue(
+      Object.assign(new Error('email in use'), { code: 'auth/email-already-in-use' })
+    );
+    signIn.mockResolvedValue({ user: { uid: 'kid-uid' } });
+    const callable = jest.fn(async () => {
+      throw new Error('ALREADY_CHILD');
+    });
+    (functions as any).__mocks.httpsCallable.mockReturnValue(callable);
+
+    await expect(
+      registerParent({
+        email: 'kid@example.com',
+        password: 'secret123',
+        displayName: '媽媽',
+        familyName: '我們家',
+      })
+    ).rejects.toThrow('ALREADY_CHILD');
+    expect(signOut).toHaveBeenCalled();
+  });
+
+  it('CF 拋非角色衝突錯誤（網路/冷啟動）→ 不登出，保留 session 供重試恢復', async () => {
+    const createUser = (auth as any).__mocks.createUserWithEmailAndPassword;
+    const signOut = (auth as any).__mocks.signOut;
+    createUser.mockResolvedValue({ user: { uid: 'new-uid' } });
+    const callable = jest.fn(async () => {
+      throw new Error('deadline-exceeded');
+    });
+    (functions as any).__mocks.httpsCallable.mockReturnValue(callable);
+
+    await expect(
+      registerParent({
+        email: 'mom@example.com',
+        password: 'secret123',
+        displayName: '媽媽',
+        familyName: '我們家',
+      })
+    ).rejects.toThrow('deadline-exceeded');
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
   it('createUser 其他錯誤直接拋出，不嘗試恢復登入', async () => {
     const createUser = (auth as any).__mocks.createUserWithEmailAndPassword;
     const signIn = (auth as any).__mocks.signInWithEmailAndPassword;

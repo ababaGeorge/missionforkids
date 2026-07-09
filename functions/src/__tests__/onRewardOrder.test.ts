@@ -152,6 +152,45 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect((await db().collection('pointTransactions').doc('reward_order_ord-8').get()).exists).toBe(false);
   });
 
+  // R2-21(P8) 防禦性測試：reject 路徑不寫餘額快照——client 端 hasSnapshot 判斷
+  // 依賴「rejected 訂單沒有快照欄位」，一旦誤寫會讓審核 sheet 顯示錯誤餘額。
+  it('餘額不足 rejected → 不寫 balanceBefore/AfterSnapshot 快照欄位（R2-21）', async () => {
+    const familyId = 'f9';
+    await seedChildMembership('k9', familyId, 'k9');
+    await seedWallet(familyId, 'k9', 10);
+    await seedRewardItem('item-9', familyId, 50);
+    const order = { userId: 'k9', familyId, itemId: 'item-9', pointCostSnapshot: 50, status: 'pending' };
+    await seedOrder('ord-9', order);
+    await fireCreated('ord-9', order);
+
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-9').get()).data();
+    expect(orderDoc?.status).toBe('rejected');
+    expect(orderDoc?.balanceBeforeSnapshot).toBeUndefined();
+    expect(orderDoc?.balanceAfterSnapshot).toBeUndefined();
+  });
+
+  // R2-21(P8) 防禦性測試：trigger 重放（Firestore trigger at-least-once）不得用
+  // 重放當下的錢包餘額覆寫「下單當時」的快照——快照語意是歷史記錄，只能寫一次。
+  it('replay（重複 trigger）→ 不覆寫既有餘額快照（R2-21）', async () => {
+    const familyId = 'f10';
+    await seedChildMembership('k10', familyId, 'k10');
+    await seedWallet(familyId, 'k10', 100);
+    await seedRewardItem('item-10', familyId, 25);
+    const order = { userId: 'k10', familyId, itemId: 'item-10', pointCostSnapshot: 25, status: 'pending' };
+    await seedOrder('ord-10', order);
+    await fireCreated('ord-10', order); // 快照 100/75、餘額 75
+
+    // 下單到重放之間小孩又賺了點（餘額改變），重放不得據此改寫快照
+    await db().collection('pointWallets').doc(`${familyId}_k10`).update({ balance: 500 });
+    await fireCreated('ord-10', order); // 重放
+
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-10').get()).data();
+    expect(orderDoc?.balanceBeforeSnapshot).toBe(100);
+    expect(orderDoc?.balanceAfterSnapshot).toBe(75);
+    // 也不重複扣點
+    expect((await db().collection('pointWallets').doc(`${familyId}_k10`).get()).data()?.balance).toBe(500);
+  });
+
   it('rewardItems 已封存（archived）→ reject、不扣點（A2）', async () => {
     const familyId = 'f6';
     await seedChildMembership('k6', familyId, 'k6');

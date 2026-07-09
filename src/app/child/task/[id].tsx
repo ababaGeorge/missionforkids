@@ -95,13 +95,16 @@ export default function ChildTaskDetail() {
               } else {
                 setNotFound(true);
               }
-            } catch {
+            } catch (e) {
+              // R2-21(R2-18 審查)：dev 下留錯誤線索，避免只看到「找不到」無從除錯
+              if (__DEV__) console.warn('[ChildTaskDetail] task 讀取失敗:', e);
               setNotFound(true);
             }
           }
         },
-        () => {
+        (err) => {
           // R2-18：權限/網路錯誤也要有出口
+          if (__DEV__) console.warn('[ChildTaskDetail] instance snapshot 錯誤:', err);
           setNotFound(true);
         }
       );

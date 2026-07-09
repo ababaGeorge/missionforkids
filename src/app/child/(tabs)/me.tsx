@@ -59,6 +59,9 @@ export default function ChildMe() {
 
   useEffect(() => {
     if (!uid || !familyId) return;
+    // R2-21(P4)：刻意不加 limit——本頁統計（總完成數/連續天數/徽章門檻）需要完整歷史，
+    // 查詢沒有 orderBy，limit 會按 doc ID 任意截斷、悄悄算錯統計；補 orderBy 又需要
+    // 新 composite index。單一小孩的 instances 量有限，維持全量訂閱並在此註記。
     const unsub = firestore()
       .collection('taskInstances')
       .where('childId', '==', childId)
