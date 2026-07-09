@@ -90,6 +90,10 @@ export const acceptFamilyInvite = onCall(async (request) => {
         nickname: profile.nickname ?? null,
         avatarEmoji: profile.avatarEmoji ?? null,
       });
+    } else if (memSnap.data()?.status !== 'active') {
+      // 被移除（status: 'removed'）的成員重新受邀 → 只把 status 復原成 active。
+      // 不動 joinedAt / childId / 暱稱；錢包照「存在就不動」規則，點數保留。
+      tx.update(memRef, { status: 'active' });
     }
 
     // 確定性錢包 {familyId}_{childId}；childId == uid，故 doc id 與既有 userId 慣例一致。

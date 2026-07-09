@@ -171,6 +171,38 @@ describe('acceptFamilyInvite', () => {
     expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
   });
 
+  it('被移除的成員重新受邀 → membership 回 active、childId 不變、餘額保留、invite 標 accepted', async () => {
+    const uid = 'child-uid-9';
+    const familyId = 'fam-9';
+    await seedInvite('inv-9a', familyId);
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-9a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    const db = admin.firestore();
+    // 小孩已賺到 20 點，之後被家長移除（family.tsx 的移除只改 status）
+    await db.collection('pointWallets').doc(`${familyId}_${uid}`).update({ balance: 20 });
+    await db.collection('familyMemberships').doc(`${uid}_${familyId}`).update({ status: 'removed' });
+
+    // 家長對同一 email 再開一張邀請
+    await seedInvite('inv-9b', familyId);
+    const res: any = await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-9b' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+    expect(res).toEqual({ familyId, childId: uid });
+
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ status: 'active', childId: uid, userId: uid });
+
+    const walletDoc = await db.collection('pointWallets').doc(`${familyId}_${uid}`).get();
+    expect(walletDoc.data()!.balance).toBe(20); // 點數保留
+
+    const invDoc = await db.collection('familyInvites').doc('inv-9b').get();
+    expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
+  });
+
   it('家長帳號接受 child 邀請 → failed-precondition ALREADY_PARENT，user doc 不被改寫', async () => {
     const uid = 'parent-uid-8';
     const db = admin.firestore();
