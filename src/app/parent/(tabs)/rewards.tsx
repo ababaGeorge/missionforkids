@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -17,6 +17,7 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { RewardItem, RewardOrder } from '../../../types/models';
 import { resolveMemberDisplay } from '../../../lib/memberName';
+import { updateOrderIfStatusIn, ORDER_STALE_MESSAGES } from '../../../lib/orders';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -73,6 +74,9 @@ export default function ParentRewards() {
   const [showCreate, setShowCreate] = useState(false);
   const [tab, setTab] = useState<'catalog' | 'log'>('catalog');
   const [editingItem, setEditingItem] = useState<RewardItem | null>(null);
+  // R2-09：世代守衛——async 組裝期間新快照到來時，舊組裝作廢不 setState，
+  // 避免慢的舊結果最後寫入蓋掉新資料。模式同 child notif/tasks。
+  const orderSnapGen = useRef(0);
 
   useEffect(() => {
     if (!uid) return;
@@ -112,6 +116,7 @@ export default function ParentRewards() {
       .limit(50)
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++orderSnapGen.current;
         const list: OrderWithChild[] = [];
         for (const d of snap.docs) {
           const order = { id: d.id, ...d.data() } as RewardOrder;
@@ -134,6 +139,7 @@ export default function ParentRewards() {
           } catch {}
           list.push({ order, itemTitle, childName });
         }
+        if (gen !== orderSnapGen.current) return;
         setOrders(list);
       }, (err) => {
         // A8：缺索引/權限錯誤不再被吞掉。沒有這個 callback 時 FAILED_PRECONDITION
@@ -153,13 +159,17 @@ export default function ParentRewards() {
           try {
             const now = new Date();
             const autoComplete = new Date(now.getTime() + 72 * 60 * 60 * 1000);
-            await firestore().collection('rewardOrders').doc(orderId).update({
+            // R2-31：交易守衛（同 R2-04 模式）——僅 approved 的訂單能標
+            // delivered；已取消（點數已退）的殘留卡片拋錯誤碼顯示友善訊息，
+            // 列表交給 onSnapshot 刷新。
+            await updateOrderIfStatusIn(orderId, ['approved'], {
               status: 'delivered',
               deliveredAt: firestore.Timestamp.fromDate(now),
               autoCompleteAt: firestore.Timestamp.fromDate(autoComplete),
             });
           } catch (e: any) {
-            Alert.alert('失敗', e?.message || '不明錯誤');
+            const staleMsg = ORDER_STALE_MESSAGES[e?.message as string];
+            Alert.alert('失敗', staleMsg || e?.message || '不明錯誤');
           }
         },
       },

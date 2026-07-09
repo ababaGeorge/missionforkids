@@ -1,5 +1,6 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
 import { isValidPointsValue } from './lib/points';
 
@@ -66,15 +67,17 @@ export const grantPoints = onCall(async (request) => {
     throw new HttpsError('not-found', 'Child is not a member of this family');
   }
 
-  // Atomic transaction: 找或建確定性錢包 + 寫 transaction
-  await db.runTransaction(async (tx) => {
+  // Atomic transaction: 找或建確定性錢包 + 寫 transaction。
+  // 回傳實際變動量 delta（扣點被 clamp 時 |delta| < |amount|），供 client 顯示真實扣除值；
+  // 冪等重放（已處理過）拿不到當次 delta → 回 null，client 端 fallback 用請求值。
+  const delta = await db.runTransaction<number | null>(async (tx) => {
     // A9 冪等：有 idempotencyKey 時用確定性 tx doc id，重送/連點同一 key 不重複發點。
     const txRef = idempotencyKey
       ? db.collection('pointTransactions').doc(`parent_grant_${idempotencyKey}`)
       : db.collection('pointTransactions').doc();
     if (idempotencyKey) {
       const existing = await tx.get(txRef); // 讀必須在任何 write 之前
-      if (existing.exists) return; // 已處理過，直接結束
+      if (existing.exists) return null; // 已處理過，直接結束
     }
 
     // tx.get 在任何 write 之前
@@ -89,18 +92,22 @@ export const grantPoints = onCall(async (request) => {
         userId: childUserId,
         familyId,
         balance: initial,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     } else {
       const next = Math.max(0, wallet.balance + amount); // 餘額不低於 0
       delta = next - wallet.balance;
       tx.update(wallet.ref, {
         balance: next,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     }
 
-    if (delta !== 0) {
+    // 冪等完整性：clamp 到 delta===0 時也要落冪等標記，否則該 key 從未註冊，
+    // 同 key 重放發生在餘額回升後會真的扣款。
+    // delta===0 只可能來自 clamp（amount===0 在入口就被擋），delta:0 本身即是 clamp 標記。
+    // 不帶 key 的 delta===0 不寫（auto-id doc 無冪等價值，只是帳目噪音）。
+    if (delta !== 0 || idempotencyKey) {
       tx.set(txRef, {
         walletId: wallet.ref.id,
         childId,
@@ -109,10 +116,12 @@ export const grantPoints = onCall(async (request) => {
         sourceId: null,
         createdBy: uid,
         note: reason || (amount < 0 ? 'Parent deduct' : 'Parent grant'),
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
     }
+
+    return delta;
   });
 
-  return { success: true };
+  return { success: true, delta };
 });

@@ -27,6 +27,40 @@ describe('bootstrapParentAccount', () => {
     await expect(wrap()({ data: { displayName: 'x', familyName: 'y' } } as any)).rejects.toThrow(/unauthenticated/i);
   });
 
+  it('既有小孩帳號 → 拋 ALREADY_CHILD，user doc 不被覆寫、不另建 family', async () => {
+    const uid = 'child-uid-1';
+    const db = admin.firestore();
+    await db.collection('users').doc(uid).set({
+      displayName: '小安', roleType: 'child', childId: uid,
+      authProvider: 'password', authProviderId: uid, email: 'kid@example.com',
+    });
+    await expect(
+      wrap()({ data: { displayName: '小安', familyName: '偷渡家庭' }, auth: { uid, token: { email: 'kid@example.com' } } } as any)
+    ).rejects.toThrow(/ALREADY_CHILD/);
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()).toMatchObject({ roleType: 'child', childId: uid, displayName: '小安' });
+    const fams = await db.collection('families').where('createdBy', '==', uid).get();
+    expect(fams.size).toBe(0);
+  });
+
+  it('legacy 小孩（doc id ≠ uid、authProviderId 匹配）→ 拋 ALREADY_CHILD、不遮蔽不建 family', async () => {
+    const uid = 'legacy-child-auth-uid-1';
+    const db = admin.firestore();
+    // legacy 資料：doc id 是 placeholder，不等於 auth uid，靠 authProviderId 對回本人
+    await db.collection('users').doc('legacy-child-doc-1').set({
+      displayName: '小樂', roleType: 'child', childId: 'legacy-child-doc-1',
+      authProvider: 'password', authProviderId: uid, email: 'legacykid@example.com',
+    });
+    await expect(
+      wrap()({ data: { displayName: '小樂', familyName: '偷渡家庭' }, auth: { uid, token: { email: 'legacykid@example.com' } } } as any)
+    ).rejects.toThrow(/ALREADY_CHILD/);
+    // 不得建立 users/{uid} 遮蔽 legacy child doc
+    const shadowDoc = await db.collection('users').doc(uid).get();
+    expect(shadowDoc.exists).toBe(false);
+    const fams = await db.collection('families').where('createdBy', '==', uid).get();
+    expect(fams.size).toBe(0);
+  });
+
   it('冪等：同一個 parent 再呼叫不會建第二個 family', async () => {
     const uid = 'parent-uid-2';
     const first: any = await wrap()({ data: { displayName: '爸爸', familyName: '家一' }, auth: { uid, token: { email: 'dad@example.com' } } } as any);

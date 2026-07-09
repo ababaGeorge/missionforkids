@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
@@ -38,6 +39,7 @@ const fmtTime = (ts: any): string => {
 };
 
 export default function ParentNotif() {
+  const router = useRouter();
   const uid = auth().currentUser?.uid;
   const { family } = useFamily(uid);
   const familyId = family?.id ?? null;
@@ -173,7 +175,12 @@ export default function ParentNotif() {
               return (
                 <Pressable
                   key={n.id}
-                  onPress={() => markOneRead(n.id)}
+                  onPress={() => {
+                    markOneRead(n.id);
+                    // 任務審核與兌換訂單都在審核頁處理（review.tsx 同頁列出兩區），
+                    // 該頁沒有 tab/section 參數可帶，直接導到頁面即可。
+                    router.push('/parent/(tabs)/review');
+                  }}
                   style={[styles.notifCard, isRead && styles.notifCardRead]}
                 >
                   {!isRead && <View style={styles.unreadDot} />}

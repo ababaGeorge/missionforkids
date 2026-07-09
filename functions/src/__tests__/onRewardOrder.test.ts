@@ -117,6 +117,104 @@ describe('onRewardOrderCreated (扣點)', () => {
     expect((await db().collection('pointWallets').doc(`${familyId}_k5`).get()).data()?.balance).toBe(100);
   });
 
+  // R2-03 競態守衛：訂單在 trigger 執行前已被取消 → 不扣點。
+  // 否則退款 trigger 因找不到扣款紀錄跳過退款，扣款 trigger 稍後照扣 → 點數遺失無帳可對。
+  it('訂單在 trigger 前已 cancelled → 不扣點、不寫 pointTransaction、不寫快照欄位（R2-03）', async () => {
+    const familyId = 'f7';
+    await seedChildMembership('k7', familyId, 'k7');
+    await seedWallet(familyId, 'k7', 100);
+    await seedRewardItem('item-7', familyId, 20);
+    const order = { userId: 'k7', familyId, itemId: 'item-7', pointCostSnapshot: 20, status: 'pending' };
+    // doc 現況已是 cancelled（trigger 收到的仍是建立當下的 pending snapshot）
+    await seedOrder('ord-7', { ...order, status: 'cancelled' });
+    await fireCreated('ord-7', order);
+
+    expect((await db().collection('pointWallets').doc(`${familyId}_k7`).get()).data()?.balance).toBe(100);
+    expect((await db().collection('pointTransactions').doc('reward_order_ord-7').get()).exists).toBe(false);
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-7').get()).data();
+    expect(orderDoc?.balanceBeforeSnapshot).toBeUndefined();
+    expect(orderDoc?.balanceAfterSnapshot).toBeUndefined();
+  });
+
+  // FIX-A：守衛收窄——家長核准搶在扣款 trigger 前（冷啟動 2-10 秒窗口）→ 照扣。
+  // 舊守衛「非 pending 一律跳過」會讓 approved 訂單永久跳過扣款 → 免費領獎、無帳可查。
+  it('訂單在 trigger 前已 approved → 照扣、寫快照欄位、寫 ledger（FIX-A）', async () => {
+    const familyId = 'f11';
+    await seedChildMembership('k11', familyId, 'k11');
+    await seedWallet(familyId, 'k11', 100);
+    await seedRewardItem('item-11', familyId, 30);
+    const order = { userId: 'k11', familyId, itemId: 'item-11', pointCostSnapshot: 30, status: 'pending' };
+    // doc 現況已被家長核准（trigger 收到的仍是建立當下的 pending snapshot）
+    await seedOrder('ord-11', { ...order, status: 'approved' });
+    await fireCreated('ord-11', order);
+
+    // 照扣 30
+    expect((await db().collection('pointWallets').doc(`${familyId}_k11`).get()).data()?.balance).toBe(70);
+    // ledger 有帳
+    const pt = await db().collection('pointTransactions').doc('reward_order_ord-11').get();
+    expect(pt.data()).toMatchObject({ walletId: `${familyId}_k11`, delta: -30, sourceType: 'reward_order' });
+    // 快照欄位照寫、status 維持 approved 不被改動
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-11').get()).data();
+    expect(orderDoc?.balanceBeforeSnapshot).toBe(100);
+    expect(orderDoc?.balanceAfterSnapshot).toBe(70);
+    expect(orderDoc?.status).toBe('approved');
+  });
+
+  // R2-30：品項無效的 reject 路徑也要守衛——訂單已 cancelled 不得被蓋成 rejected。
+  // （trigger 收到的是建立當下的 pending snapshot，但 doc 現況可能已被小孩取消。）
+  it('訂單已 cancelled＋品項無效 → 維持 cancelled、不被蓋成 rejected（R2-30）', async () => {
+    const familyId = 'f8';
+    await seedChildMembership('k8', familyId, 'k8');
+    await seedWallet(familyId, 'k8', 100);
+    // 不 seed item（品項無效）
+    const order = { userId: 'k8', familyId, itemId: 'ghost-item-8', pointCostSnapshot: 20, status: 'pending' };
+    await seedOrder('ord-8', { ...order, status: 'cancelled' }); // doc 現況已 cancelled
+    await fireCreated('ord-8', order);
+
+    expect((await db().collection('rewardOrders').doc('ord-8').get()).data()?.status).toBe('cancelled');
+    expect((await db().collection('pointWallets').doc(`${familyId}_k8`).get()).data()?.balance).toBe(100);
+    expect((await db().collection('pointTransactions').doc('reward_order_ord-8').get()).exists).toBe(false);
+  });
+
+  // R2-21(P8) 防禦性測試：reject 路徑不寫餘額快照——client 端 hasSnapshot 判斷
+  // 依賴「rejected 訂單沒有快照欄位」，一旦誤寫會讓審核 sheet 顯示錯誤餘額。
+  it('餘額不足 rejected → 不寫 balanceBefore/AfterSnapshot 快照欄位（R2-21）', async () => {
+    const familyId = 'f9';
+    await seedChildMembership('k9', familyId, 'k9');
+    await seedWallet(familyId, 'k9', 10);
+    await seedRewardItem('item-9', familyId, 50);
+    const order = { userId: 'k9', familyId, itemId: 'item-9', pointCostSnapshot: 50, status: 'pending' };
+    await seedOrder('ord-9', order);
+    await fireCreated('ord-9', order);
+
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-9').get()).data();
+    expect(orderDoc?.status).toBe('rejected');
+    expect(orderDoc?.balanceBeforeSnapshot).toBeUndefined();
+    expect(orderDoc?.balanceAfterSnapshot).toBeUndefined();
+  });
+
+  // R2-21(P8) 防禦性測試：trigger 重放（Firestore trigger at-least-once）不得用
+  // 重放當下的錢包餘額覆寫「下單當時」的快照——快照語意是歷史記錄，只能寫一次。
+  it('replay（重複 trigger）→ 不覆寫既有餘額快照（R2-21）', async () => {
+    const familyId = 'f10';
+    await seedChildMembership('k10', familyId, 'k10');
+    await seedWallet(familyId, 'k10', 100);
+    await seedRewardItem('item-10', familyId, 25);
+    const order = { userId: 'k10', familyId, itemId: 'item-10', pointCostSnapshot: 25, status: 'pending' };
+    await seedOrder('ord-10', order);
+    await fireCreated('ord-10', order); // 快照 100/75、餘額 75
+
+    // 下單到重放之間小孩又賺了點（餘額改變），重放不得據此改寫快照
+    await db().collection('pointWallets').doc(`${familyId}_k10`).update({ balance: 500 });
+    await fireCreated('ord-10', order); // 重放
+
+    const orderDoc = (await db().collection('rewardOrders').doc('ord-10').get()).data();
+    expect(orderDoc?.balanceBeforeSnapshot).toBe(100);
+    expect(orderDoc?.balanceAfterSnapshot).toBe(75);
+    // 也不重複扣點
+    expect((await db().collection('pointWallets').doc(`${familyId}_k10`).get()).data()?.balance).toBe(500);
+  });
+
   it('rewardItems 已封存（archived）→ reject、不扣點（A2）', async () => {
     const familyId = 'f6';
     await seedChildMembership('k6', familyId, 'k6');

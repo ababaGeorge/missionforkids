@@ -98,7 +98,12 @@ export default function FamilyScreen() {
         for (const d of snap.docs) {
           const mem = { id: d.id, ...d.data() } as FamilyMembership;
           const u = await resolveMemberUser(mem.userId);
-          if (u) rows.push({ membership: mem, user: u });
+          // 舊資料在加固 rules 下可能查不到 user doc——退回 membership
+          // 暱稱顯示（nameOf 會補 '?'），不讓成員整列消失。
+          rows.push({
+            membership: mem,
+            user: u ?? ({ id: mem.userId, displayName: '' } as User),
+          });
         }
         setMembers(rows);
       });
@@ -162,7 +167,7 @@ export default function FamilyScreen() {
     setGranting(true);
     try {
       const fn = functions().httpsCallable('grantPoints');
-      await fn({
+      const res = await fn({
         childUserId: grantTarget.userId,
         familyId: family.id,
         amount: signed,
@@ -171,10 +176,21 @@ export default function FamilyScreen() {
           (grantMode === 'deduct' ? '爸媽扣點' : '爸媽直接給'),
         idempotencyKey,
       });
-      Alert.alert(
-        '',
-        `${signed > 0 ? '+' : ''}${signed} ★ → ${grantTarget.name}`
-      );
+      // server 回傳實際變動量 delta（扣點超過餘額會被 clamp）；冪等重放拿不到 → fallback 用請求值
+      const delta = (res.data as { delta?: number | null })?.delta ?? null;
+      const shown = delta ?? signed;
+      const adjusted = delta != null && delta !== signed;
+      if (delta === 0) {
+        // 扣點被 clamp 到 0（餘額已是 0）→ 給明確說明，不用「已依餘額調整」帶過
+        Alert.alert('', `${grantTarget.name} 的餘額已是 0，這次沒有扣點`);
+      } else {
+        Alert.alert(
+          '',
+          `${shown > 0 ? '+' : ''}${shown} ★ → ${grantTarget.name}${
+            adjusted ? '（已依餘額調整）' : ''
+          }`
+        );
+      }
       setShowGrant(false);
       setGrantAmount('10');
       setGrantReason('');
@@ -383,8 +399,10 @@ export default function FamilyScreen() {
         onPress={() => setShowInviteEmail(true)}
         style={styles.fab}
         hitSlop={10}
+        accessibilityLabel="邀請小孩"
       >
         <Body style={{ color: P.bg, fontSize: 26, fontWeight: '800' }}>+</Body>
+        <Body style={{ color: P.bg, fontSize: 15, fontWeight: '800' }}>邀請小孩</Body>
       </Pressable>
 
       {renderCreateFamilyModal()}
@@ -745,12 +763,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 18,
     bottom: 92,
-    width: 56,
     height: 56,
-    borderRadius: 28,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.full,
     backgroundColor: P.primary,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     shadowColor: '#000',
     shadowOpacity: 0.35,
     shadowRadius: 24,

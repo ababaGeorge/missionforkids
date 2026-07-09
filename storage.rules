@@ -16,10 +16,10 @@ service firebase.storage {
       // 家庭成員可讀取
       allow read: if request.auth != null && isFamilyMember(familyId);
 
-      // 家庭成員可上傳，限制 5MB、僅限圖片
+      // 家庭成員可上傳，限制 12MB、僅限圖片（R2-12：App 拍照僅 quality 0.7 無 resize，高畫素 JPEG 可超 5MB）
       allow create: if request.auth != null
                     && isFamilyMember(familyId)
-                    && request.resource.size < 5 * 1024 * 1024
+                    && request.resource.size < 12 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*');
 
       // 照片不可覆蓋或刪除
@@ -31,10 +31,10 @@ service firebase.storage {
       // 只有本人可讀取
       allow read: if request.auth != null && request.auth.uid == userId;
 
-      // 只有本人可上傳，限制 5MB、僅限圖片
+      // 只有本人可上傳，限制 12MB、僅限圖片（R2-12：同上）
       allow create: if request.auth != null
                     && request.auth.uid == userId
-                    && request.resource.size < 5 * 1024 * 1024
+                    && request.resource.size < 12 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*');
 
       allow update, delete: if false;

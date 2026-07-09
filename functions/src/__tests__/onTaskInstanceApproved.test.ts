@@ -141,4 +141,38 @@ describe('onTaskInstanceApproved (childId 重構)', () => {
     await fireApproved('inst-7', inst);
     expect((await db().collection('pointWallets').doc(`${familyId}_kid7`).get()).exists).toBe(false);
   });
+
+  // CX-2 回歸測試：trigger 延遲期間 instance 被改走 approved（如家長 B 的任務編輯蓋成 missed）
+  // → 交易內重讀 status，非 approved 不發點、不寫 ledger、不寫 pointsAwarded。
+  it('trigger 前 instance 被改成 missed → 不入點、不寫 ledger、不寫 pointsAwarded', async () => {
+    const familyId = 'fam8';
+    await seedTask('task-8', 40);
+    await seedChildMembership('kid8', familyId, 'kid8');
+    await seedParentMembership('rev', familyId);
+    const inst = { taskId: 'task-8', userId: 'kid8', familyId, childId: 'kid8', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
+    // 事件 payload 是 approved，但實際 doc 已被蓋成 missed
+    await seedInstance('inst-8', { ...inst, status: 'missed' });
+
+    await fireApproved('inst-8', inst);
+
+    expect((await db().collection('pointWallets').doc(`${familyId}_kid8`).get()).exists).toBe(false);
+    expect((await db().collection('pointTransactions').doc('task_completion_inst-8').get()).exists).toBe(false);
+    const inDoc = await db().collection('taskInstances').doc('inst-8').get();
+    expect(inDoc.data()?.status).toBe('missed');
+    expect(inDoc.data()?.pointsAwarded).toBeNull();
+  });
+
+  it('trigger 前 instance 被刪除 → 不入點、不炸交易', async () => {
+    const familyId = 'fam9';
+    await seedTask('task-9', 25);
+    await seedChildMembership('kid9', familyId, 'kid9');
+    await seedParentMembership('rev', familyId);
+    const inst = { taskId: 'task-9', userId: 'kid9', familyId, childId: 'kid9', status: 'approved', pointsAwarded: null, reviewedBy: 'rev' };
+    // 不 seed instance——模擬 doc 在 trigger 執行前已被刪除
+
+    await expect(fireApproved('inst-9', inst)).resolves.not.toThrow();
+
+    expect((await db().collection('pointWallets').doc(`${familyId}_kid9`).get()).exists).toBe(false);
+    expect((await db().collection('pointTransactions').doc('task_completion_inst-9').get()).exists).toBe(false);
+  });
 });

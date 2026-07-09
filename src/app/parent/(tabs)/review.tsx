@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -23,6 +23,11 @@ import type {
 } from '../../../types/models';
 import { useFamily } from '../../../hooks/useFamily';
 import { resolveMemberDisplay } from '../../../lib/memberName';
+import { updateOrderIfPending, ORDER_STALE_MESSAGES } from '../../../lib/orders';
+import {
+  updateInstanceIfStatusIn,
+  INSTANCE_STALE_MESSAGES,
+} from '../../../lib/instances';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -105,6 +110,10 @@ export default function ParentReview() {
   const [reviewOrders, setReviewOrders] = useState<ReviewOrder[]>([]);
   const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
   const [activeOrder, setActiveOrder] = useState<ReviewOrder | null>(null);
+  // R2-09：世代守衛——async 組裝期間新快照到來時，舊組裝作廢不 setState，
+  // 避免慢的舊結果最後寫入蓋掉新資料（已審卡片回彈）。模式同 child notif/tasks。
+  const taskSnapGen = useRef(0);
+  const orderSnapGen = useRef(0);
 
   useEffect(() => {
     if (!family) return;
@@ -114,41 +123,48 @@ export default function ParentReview() {
       .where('status', '==', 'submitted')
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++taskSnapGen.current;
         const list: ReviewTask[] = [];
         for (const doc of snap.docs) {
-          const instance = { id: doc.id, ...doc.data() } as TaskInstance;
-          const subSnap = await firestore()
-            .collection('taskSubmissions')
-            .where('familyId', '==', family.id)
-            .where('taskInstanceId', '==', instance.id)
-            .orderBy('submittedAt', 'desc')
-            .limit(1)
-            .get();
-          if (subSnap.empty) continue;
-          const submission = {
-            id: subSnap.docs[0].id,
-            ...subSnap.docs[0].data(),
-          } as TaskSubmission;
-          const taskDoc = await firestore()
-            .collection('tasks')
-            .doc(instance.taskId)
-            .get();
-          const taskData = taskDoc.data();
-          const { name: childName } = await resolveMemberDisplay(
-            family.id,
-            instance.userId,
-            '小朋友'
-          );
-          list.push({
-            instance,
-            submission,
-            taskTitle: taskData?.title || '—',
-            taskPoints: taskData?.points || 0,
-            childName,
-          });
+          // R2-09：per-item 容錯——單筆內嵌讀取失敗只跳過該筆，其餘照常顯示
+          try {
+            const instance = { id: doc.id, ...doc.data() } as TaskInstance;
+            const subSnap = await firestore()
+              .collection('taskSubmissions')
+              .where('familyId', '==', family.id)
+              .where('taskInstanceId', '==', instance.id)
+              .orderBy('submittedAt', 'desc')
+              .limit(1)
+              .get();
+            if (subSnap.empty) continue;
+            const submission = {
+              id: subSnap.docs[0].id,
+              ...subSnap.docs[0].data(),
+            } as TaskSubmission;
+            const taskDoc = await firestore()
+              .collection('tasks')
+              .doc(instance.taskId)
+              .get();
+            const taskData = taskDoc.data();
+            const { name: childName } = await resolveMemberDisplay(
+              family.id,
+              instance.userId,
+              '小朋友'
+            );
+            list.push({
+              instance,
+              submission,
+              taskTitle: taskData?.title || '—',
+              taskPoints: taskData?.points || 0,
+              childName,
+            });
+          } catch (e) {
+            console.warn('[Review] skipping task', doc.id, (e as any)?.code);
+          }
         }
+        if (gen !== taskSnapGen.current) return;
         setReviewTasks(list);
-      });
+      }, (err) => console.error('[Review] tasks snapshot error:', (err as any)?.code));
     return unsub;
   }, [family?.id]);
 
@@ -160,29 +176,36 @@ export default function ParentReview() {
       .where('status', '==', 'pending')
       .onSnapshot(async (snap) => {
         if (!snap) return;
+        const gen = ++orderSnapGen.current;
         const list: ReviewOrder[] = [];
         for (const doc of snap.docs) {
-          const order = { id: doc.id, ...doc.data() } as RewardOrder;
-          const itemDoc = await firestore()
-            .collection('rewardItems')
-            .doc(order.itemId)
-            .get();
-          const itemData = itemDoc.data();
-          const { name: childName } = await resolveMemberDisplay(
-            family.id,
-            order.userId,
-            '小朋友'
-          );
-          list.push({
-            order,
-            item: itemData
-              ? ({ id: itemDoc.id, ...itemData } as RewardItem)
-              : null,
-            childName,
-          });
+          // R2-09：per-item 容錯——單筆內嵌讀取失敗只跳過該筆，其餘照常顯示
+          try {
+            const order = { id: doc.id, ...doc.data() } as RewardOrder;
+            const itemDoc = await firestore()
+              .collection('rewardItems')
+              .doc(order.itemId)
+              .get();
+            const itemData = itemDoc.data();
+            const { name: childName } = await resolveMemberDisplay(
+              family.id,
+              order.userId,
+              '小朋友'
+            );
+            list.push({
+              order,
+              item: itemData
+                ? ({ id: itemDoc.id, ...itemData } as RewardItem)
+                : null,
+              childName,
+            });
+          } catch (e) {
+            console.warn('[Review] skipping order', doc.id, (e as any)?.code);
+          }
         }
+        if (gen !== orderSnapGen.current) return;
         setReviewOrders(list);
-      });
+      }, (err) => console.error('[Review] orders snapshot error:', (err as any)?.code));
     return unsub;
   }, [family?.id]);
 
@@ -361,37 +384,46 @@ function ReviewTaskSheet({
 
   if (!item) return null;
 
+  // R2-FB：activeTask 是開 sheet 當下的凍結快照——期間另一位家長可能已把
+  // instance 標成 missed/已處理。改走交易守衛（前置狀態 {submitted}），
+  // stale 時比照 R2-04：友善訊息＋關 sheet 讓列表刷新。
   const handleApprove = async () => {
     try {
-      await firestore()
-        .collection('taskInstances')
-        .doc(item.instance.id)
-        .update({
-          status: 'approved',
-          reviewedBy: uid,
-          reviewedAt: firestore.FieldValue.serverTimestamp(),
-          ...(note.trim() ? { parentNote: note.trim() } : {}),
-        });
+      await updateInstanceIfStatusIn(item.instance.id, ['submitted'], {
+        status: 'approved',
+        reviewedBy: uid,
+        reviewedAt: firestore.FieldValue.serverTimestamp(),
+        ...(note.trim() ? { parentNote: note.trim() } : {}),
+      });
       onClose();
     } catch (e: any) {
+      const staleMsg = INSTANCE_STALE_MESSAGES[e?.message as string];
+      if (staleMsg) {
+        // 殘留卡片：關閉 sheet，列表交給 onSnapshot 刷新
+        Keyboard.dismiss();
+        onClose();
+        Alert.alert('通過失敗', staleMsg);
+        return;
+      }
       Alert.alert('通過失敗', e?.message || '不明錯誤');
     }
   };
 
   const handleReject = async () => {
-    const currentCount = item.instance.submissionCount || 0;
-    const newStatus = currentCount >= 3 ? 'missed' : 'rejected';
-    const updates: Record<string, any> = {
-      status: newStatus,
-      reviewedBy: uid,
-      reviewedAt: firestore.FieldValue.serverTimestamp(),
-    };
-    if (note.trim()) updates.parentNote = note.trim();
     try {
-      await firestore()
-        .collection('taskInstances')
-        .doc(item.instance.id)
-        .update(updates);
+      // R2-FB：三振計數改用交易內重讀的 submissionCount——凍結快照的舊值
+      // 可能少算次數，讓第 3 次退回沒被標成 missed。
+      await updateInstanceIfStatusIn(item.instance.id, ['submitted'], (data) => {
+        const currentCount = (data.submissionCount as number) || 0;
+        const newStatus = currentCount >= 3 ? 'missed' : 'rejected';
+        const updates: Record<string, any> = {
+          status: newStatus,
+          reviewedBy: uid,
+          reviewedAt: firestore.FieldValue.serverTimestamp(),
+        };
+        if (note.trim()) updates.parentNote = note.trim();
+        return updates;
+      });
       if (note.trim()) {
         await firestore()
           .collection('taskSubmissions')
@@ -401,6 +433,14 @@ function ReviewTaskSheet({
       Keyboard.dismiss();
       onClose();
     } catch (e: any) {
+      const staleMsg = INSTANCE_STALE_MESSAGES[e?.message as string];
+      if (staleMsg) {
+        // 殘留卡片：關閉 sheet，列表交給 onSnapshot 刷新
+        Keyboard.dismiss();
+        onClose();
+        Alert.alert('退回失敗', staleMsg);
+        return;
+      }
       Alert.alert('退回失敗', e?.message || '不明錯誤');
     }
   };
@@ -530,6 +570,12 @@ function ReviewTaskSheet({
 }
 
 // =============================================================================
+// R2-04：家長核准/婉拒前的訂單狀態守衛（R2-31 抽到 src/lib/orders.ts 與
+// rewards.tsx 共用，行為不變：前置狀態 {pending}，錯誤碼由
+// ORDER_STALE_MESSAGES 轉成友善訊息並關閉 sheet 讓列表刷新）。
+// =============================================================================
+
+// =============================================================================
 // Redeem Confirm Sheet — spec 4.4
 // =============================================================================
 function RedeemConfirmSheet({
@@ -566,17 +612,22 @@ function RedeemConfirmSheet({
 
   const handleApprove = async () => {
     try {
-      await firestore()
-        .collection('rewardOrders')
-        .doc(order.order.id)
-        .update({
-          status: 'approved',
-          approvedAt: firestore.FieldValue.serverTimestamp(),
-          ...(note.trim() ? { parentNote: note.trim() } : {}),
-        });
+      await updateOrderIfPending(order.order.id, {
+        status: 'approved',
+        approvedAt: firestore.FieldValue.serverTimestamp(),
+        ...(note.trim() ? { parentNote: note.trim() } : {}),
+      });
       Keyboard.dismiss();
       onClose();
     } catch (e: any) {
+      const staleMsg = ORDER_STALE_MESSAGES[e?.message as string];
+      if (staleMsg) {
+        // 殘留卡片：關閉 sheet，列表交給 onSnapshot 刷新
+        Keyboard.dismiss();
+        onClose();
+        Alert.alert('同意失敗', staleMsg);
+        return;
+      }
       Alert.alert('同意失敗', e?.message || '不明錯誤');
     }
   };
@@ -587,16 +638,21 @@ function RedeemConfirmSheet({
       return;
     }
     try {
-      await firestore()
-        .collection('rewardOrders')
-        .doc(order.order.id)
-        .update({
-          status: 'rejected',
-          parentNote: note.trim(),
-        });
+      await updateOrderIfPending(order.order.id, {
+        status: 'rejected',
+        parentNote: note.trim(),
+      });
       Keyboard.dismiss();
       onClose();
     } catch (e: any) {
+      const staleMsg = ORDER_STALE_MESSAGES[e?.message as string];
+      if (staleMsg) {
+        // 殘留卡片：關閉 sheet，列表交給 onSnapshot 刷新
+        Keyboard.dismiss();
+        onClose();
+        Alert.alert('婉拒失敗', staleMsg);
+        return;
+      }
       Alert.alert('婉拒失敗', e?.message || '不明錯誤');
     }
   };

@@ -23,7 +23,11 @@
     "signOut": "登出",
     "welcome": "歡迎來到任務獎勵",
     "parentSignIn": "家長登入",
-    "join": "加入"
+    "join": "加入",
+    "forgotPassword": "忘記密碼？",
+    "resetEmailSent": "重設信已寄出，請查收",
+    "resetEmailEmptyEmail": "請先填寫 Email",
+    "resetEmailFailed": "重設信寄送失敗，請稍後再試"
   },
   "family": {
     "createFamily": "建立家庭",

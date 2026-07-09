@@ -1,10 +1,29 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
 import { isValidPointsValue } from './lib/points';
 
 const db = admin.firestore;
+
+type DocumentReference = admin.firestore.DocumentReference;
+
+/**
+ * R2-30：reject 寫入前在交易內重讀現況（與 R2-03 扣點守衛同模式）。
+ * trigger 收到的是建立當下的 pending snapshot，但 doc 現況可能已被取消——
+ * 只有仍是 pending 才寫 rejected，否則保持現狀並 log skip。
+ */
+async function rejectOrderIfPending(orderRef: DocumentReference, orderId: string): Promise<void> {
+  await db().runTransaction(async (tx) => {
+    const cur = await tx.get(orderRef);
+    if (!cur.exists || cur.data()?.status !== 'pending') {
+      logger.info('Order no longer pending, skipping reject', { orderId, status: cur.data()?.status });
+      return;
+    }
+    tx.update(orderRef, { status: 'rejected' });
+  });
+}
 
 /**
  * 孩子建立 rewardOrder 時，從確定性錢包 {familyId}_{childId} 扣點。
@@ -33,13 +52,13 @@ export const onRewardOrderCreated = onDocumentCreated(
       if (item.status !== 'active') throw new Error('reward item not active');
       authoritativeCost = item.pointCost;
     } catch (e) {
-      await snap.ref.update({ status: 'rejected' });
+      await rejectOrderIfPending(snap.ref, orderId);
       logger.warn('reward item invalid, rejecting order', { orderId, itemId, err: String(e) });
       return;
     }
 
     if (!isValidPointsValue(authoritativeCost) || authoritativeCost <= 0) {
-      await snap.ref.update({ status: 'rejected' });
+      await rejectOrderIfPending(snap.ref, orderId);
       logger.warn('authoritative cost malformed, rejecting order', { orderId, authoritativeCost });
       return;
     }
@@ -48,7 +67,7 @@ export const onRewardOrderCreated = onDocumentCreated(
     try {
       childId = await resolveAuthoritativeChildId(db(), familyId, userId);
     } catch (e) {
-      await snap.ref.update({ status: 'rejected' });
+      await rejectOrderIfPending(snap.ref, orderId);
       logger.error('resolveAuthoritativeChildId failed, rejecting order', { orderId, err: String(e) });
       return;
     }
@@ -58,6 +77,16 @@ export const onRewardOrderCreated = onDocumentCreated(
       const ptRef = db().collection('pointTransactions').doc(`reward_order_${orderId}`);
       const ptSnap = await tx.get(ptRef);
       if (ptSnap.exists) return; // 已扣過（重放保護）
+
+      // R2-03 競態守衛（FIX-A 收窄）：只在訂單已被取消/拒絕（或不存在）時跳過扣款——
+      // 退款 trigger 對應這兩態，若照扣會因「找不到扣款紀錄」跳過退款，點數永久遺失。
+      // approved/delivered/completed 必須照扣：家長核准可搶在扣款 trigger（冷啟動 2-10 秒）
+      // 之前落地，若跳過就變成免費領獎、無帳可查（重放保護由上方 ptSnap 承擔，不會重複扣）。
+      const orderSnap = await tx.get(snap.ref);
+      if (!orderSnap.exists || ['cancelled', 'rejected'].includes(orderSnap.data()?.status)) {
+        logger.info('Order cancelled/rejected or missing, skipping deduction', { orderId, status: orderSnap.data()?.status });
+        return;
+      }
 
       const wallet = await resolveChildWallet(tx, db(), familyId, childId);
 
@@ -74,8 +103,8 @@ export const onRewardOrderCreated = onDocumentCreated(
       }
 
       tx.update(wallet.ref, {
-        balance: admin.firestore.FieldValue.increment(-authoritativeCost),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        balance: FieldValue.increment(-authoritativeCost),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       // 把 client 寫的 pointCostSnapshot 正規化成權威售價（顯示與退款一致）
       // BUG-06 修復：把下單當時的扣款前/後餘額寫回訂單 doc，審核 sheet 不用再回推「目前餘額＋cost」
@@ -93,7 +122,7 @@ export const onRewardOrderCreated = onDocumentCreated(
         sourceId: orderId,
         createdBy: null,
         note: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
     });
 

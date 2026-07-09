@@ -1,8 +1,10 @@
-import * as admin from 'firebase-admin';
-
-type Firestore = admin.firestore.Firestore;
-type Transaction = admin.firestore.Transaction;
-type DocumentReference = admin.firestore.DocumentReference;
+// R2-21(R2-01 審查)：純型別匯入改走 firebase-admin/firestore 子路徑，
+// 不再繞 admin.firestore.* namespace 取型別（行為零變，編譯後無殘留）。
+import type {
+  DocumentReference,
+  Firestore,
+  Transaction,
+} from 'firebase-admin/firestore';
 
 /**
  * 解析權威 childId（family-scoped）。

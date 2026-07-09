@@ -72,26 +72,45 @@ export default function ChildTaskDetail() {
     const unsub = firestore()
       .collection('taskInstances')
       .doc(instanceId)
-      .onSnapshot(async (snap) => {
-        if (!snap) return;
-        const data = snap.data();
-        if (!data) {
-          setNotFound(true);
-          return;
-        }
-        const inst = { id: snap.id, ...data } as InstanceDoc;
-        setInstance(inst);
-        if (!task || task.id !== inst.taskId) {
-          const taskDoc = await firestore()
-            .collection('tasks')
-            .doc(inst.taskId)
-            .get();
-          const tData = taskDoc.data();
-          if (tData) {
-            setTask({ id: taskDoc.id, ...tData } as Task & { emoji?: string });
+      .onSnapshot(
+        async (snap) => {
+          if (!snap) return;
+          const data = snap.data();
+          if (!data) {
+            setNotFound(true);
+            return;
           }
+          const inst = { id: snap.id, ...data } as InstanceDoc;
+          setInstance(inst);
+          // 快照成功 → 清掉先前暫時性失敗留下的 notFound，讓畫面自癒
+          setNotFound(false);
+          if (!task || task.id !== inst.taskId) {
+            // R2-18：task get 失敗或 task 文件不存在 → 給「找不到」出口，不再永久轉圈
+            try {
+              const taskDoc = await firestore()
+                .collection('tasks')
+                .doc(inst.taskId)
+                .get();
+              const tData = taskDoc.data();
+              if (tData) {
+                setTask({ id: taskDoc.id, ...tData } as Task & { emoji?: string });
+                setNotFound(false);
+              } else {
+                setNotFound(true);
+              }
+            } catch (e) {
+              // R2-21(R2-18 審查)：dev 下留錯誤線索，避免只看到「找不到」無從除錯
+              if (__DEV__) console.warn('[ChildTaskDetail] task 讀取失敗:', e);
+              setNotFound(true);
+            }
+          }
+        },
+        (err) => {
+          // R2-18：權限/網路錯誤也要有出口
+          if (__DEV__) console.warn('[ChildTaskDetail] instance snapshot 錯誤:', err);
+          setNotFound(true);
         }
-      });
+      );
     return unsub;
   }, [instanceId]);
 

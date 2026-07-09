@@ -1,6 +1,7 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveAuthoritativeChildId, resolveChildWallet } from './lib/resolveChildWallet';
 import { isValidPointsValue } from './lib/points';
 
@@ -77,9 +78,24 @@ export const onTaskInstanceApproved = onDocumentUpdated(
 
     await db().runTransaction(async (tx) => {
       // --- 所有 read 在任何 write 之前 ---
+      // CX-2: 交易內重讀 instance 的當下狀態。trigger 到交易執行之間 doc 可能被刪、
+      // 被別的家長編輯蓋成 missed（狀態已不是 approved）、或被別的觸發發過點——
+      // 任一情況都 skip，避免「錯過的任務卻有點數」的狀態與帳不一致。
       const instanceSnap = await tx.get(instanceRef);
+      if (!instanceSnap.exists) {
+        logger.info('Instance deleted before award transaction, skipping', { instanceId });
+        return;
+      }
+      if (instanceSnap.data()?.status !== 'approved') {
+        logger.info('Instance no longer approved at award time, skipping', {
+          instanceId,
+          currentStatus: instanceSnap.data()?.status,
+        });
+        return;
+      }
       if (instanceSnap.data()?.pointsAwarded != null) {
         // 重放保護：別的觸發已發過
+        logger.info('Points already awarded (transaction re-read), skipping', { instanceId });
         return;
       }
       const wallet = await resolveChildWallet(tx, db(), familyId, childId);
@@ -94,12 +110,12 @@ export const onTaskInstanceApproved = onDocumentUpdated(
           userId,
           familyId,
           balance: points,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       } else {
         tx.update(wallet.ref, {
-          balance: admin.firestore.FieldValue.increment(points),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          balance: FieldValue.increment(points),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       }
 
@@ -111,7 +127,7 @@ export const onTaskInstanceApproved = onDocumentUpdated(
         sourceId: instanceId,
         createdBy: null,
         note: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
 
       tx.update(instanceRef, { pointsAwarded: points });

@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import type { PointWallet, TaskInstance } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
 import { childIdFor, walletDocId } from '../../../lib/childId';
+import { joinDurationLabel } from '../../../lib/joinDuration';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Display, Body, Label, Muted, Data } from '../../../design/Text';
@@ -58,6 +59,9 @@ export default function ChildMe() {
 
   useEffect(() => {
     if (!uid || !familyId) return;
+    // R2-21(P4)：刻意不加 limit——本頁統計（總完成數/連續天數/徽章門檻）需要完整歷史，
+    // 查詢沒有 orderBy，limit 會按 doc ID 任意截斷、悄悄算錯統計；補 orderBy 又需要
+    // 新 composite index。單一小孩的 instances 量有限，維持全量訂閱並在此註記。
     const unsub = firestore()
       .collection('taskInstances')
       .where('childId', '==', childId)
@@ -110,11 +114,11 @@ export default function ChildMe() {
     return Math.floor((Date.now() - bd.getTime()) / (365.25 * 86400 * 1000));
   }, [user]);
 
-  const joinMonths = useMemo(() => {
+  const joinLabel = useMemo(() => {
     if (!user?.createdAt) return null;
     const c: any = user.createdAt;
     const d: Date = typeof c?.toDate === 'function' ? c.toDate() : new Date(c);
-    return Math.max(1, Math.round((Date.now() - d.getTime()) / (30 * 86400 * 1000)));
+    return joinDurationLabel(d);
   }, [user]);
 
   const firstChar = (user?.displayName || '你').charAt(0);
@@ -186,11 +190,11 @@ export default function ChildMe() {
           <Display style={{ fontSize: 24, marginTop: spacing.md }}>
             {user?.displayName || '小朋友'}
           </Display>
-          {(age != null || joinMonths != null) && (
+          {(age != null || joinLabel != null) && (
             <Muted style={{ fontSize: 12, marginTop: 2 }}>
               {age != null ? `${age} 歲` : ''}
-              {age != null && joinMonths != null ? ' · ' : ''}
-              {joinMonths != null ? `加入 ${joinMonths} 個月` : ''}
+              {age != null && joinLabel != null ? ' · ' : ''}
+              {joinLabel ?? ''}
             </Muted>
           )}
         </View>
@@ -292,15 +296,21 @@ export default function ChildMe() {
               </Pressable>
             </View>
             <View style={styles.settingsList}>
-              <View style={styles.settingsRow}>
+              <Pressable
+                onPress={() => Alert.alert('語言', '尚未開放')}
+                style={styles.settingsRow}
+              >
                 <Label style={styles.settingsLabel}>語言</Label>
                 <Muted style={styles.settingsValue}>中文 / English</Muted>
-              </View>
+              </Pressable>
               <View style={styles.settingsDivider} />
-              <View style={styles.settingsRow}>
+              <Pressable
+                onPress={() => Alert.alert('家長協助', '尚未開放')}
+                style={styles.settingsRow}
+              >
                 <Label style={styles.settingsLabel}>家長協助</Label>
                 <Muted style={styles.settingsValue}>→</Muted>
-              </View>
+              </Pressable>
               <View style={styles.settingsDivider} />
               <Pressable
                 onPress={() => {

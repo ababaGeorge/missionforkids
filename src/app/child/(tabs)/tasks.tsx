@@ -13,6 +13,7 @@ import firestore from '@react-native-firebase/firestore';
 import type { TaskInstance, Task, PointWallet } from '../../../types/models';
 import { useAuth } from '../../../hooks/useAuth';
 import { childIdFor, walletDocId } from '../../../lib/childId';
+import { celebrationStep } from '../../../lib/celebration';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { Empty } from '../../../design/Empty';
@@ -66,7 +67,7 @@ export default function ChildTasks() {
   const [items, setItems] = useState<TaskWithInstance[]>([]);
   const [wallet, setWallet] = useState<PointWallet | null>(null);
   const [celebration, setCelebration] = useState<{ points: number } | null>(null);
-  const prevStatuses = useRef<Record<string, string>>({});
+  const prevStatuses = useRef<Record<string, TaskInstance['status']>>({});
   const snapshotGen = useRef(0);
 
   useEffect(() => {
@@ -121,17 +122,22 @@ export default function ChildTasks() {
               .doc(instance.taskId)
               .get();
             const taskData = taskDoc.data();
-            if (taskData) {
+            // 家長刪任務是 soft delete（status='archived'）：archived 的任務不進清單，
+            // 避免刪了還看得到、還能提交。
+            if (taskData && taskData.status !== 'archived') {
               next.push({
                 task: { id: taskDoc.id, ...taskData } as Task & { emoji?: string },
                 instance,
               });
             }
-            const prev = prevStatuses.current[doc.id];
-            if (prev && prev !== 'approved' && instance.status === 'approved') {
-              setCelebration({ points: instance.pointsAwarded || 0 });
-            }
-            prevStatuses.current[doc.id] = instance.status;
+            // 慶祝動畫：等 pointsAwarded（CF 非同步補寫）到位才觸發，避免閃「+0」。
+            const step = celebrationStep(
+              prevStatuses.current[doc.id],
+              instance.status,
+              instance.pointsAwarded
+            );
+            if (step.celebrate) setCelebration({ points: step.points });
+            if (step.advance) prevStatuses.current[doc.id] = instance.status;
           } catch (e) {
             console.warn('[ChildTasks] skipping instance', doc.id, (e as any)?.code);
           }

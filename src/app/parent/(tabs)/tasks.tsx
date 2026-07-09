@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -17,6 +17,10 @@ import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { Task, TaskInstance } from '../../../types/models';
 import { memberName } from '../../../lib/memberName';
+import {
+  assignedUserIds,
+  planAssignmentChanges,
+} from '../../../lib/taskAssignments';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -118,8 +122,10 @@ export default function ParentTasks() {
     if (!familyId) return;
     const unsub = firestore()
       .collection('tasks')
+      // 含 archived：否則封存任務的完成/退回紀錄會從「歷程」瞬間消失。
+      // 管理分頁另外過濾回 active；既有複合索引 (familyId, status, createdAt) 同時支援 == 與 in。
       .where('familyId', '==', familyId)
-      .where('status', '==', 'active')
+      .where('status', 'in', ['active', 'archived'])
       .orderBy('createdAt', 'desc')
       .onSnapshot((snap) => {
         if (!snap) return;
@@ -177,12 +183,17 @@ export default function ParentTasks() {
     return unsub;
   }, [familyId]);
 
+  // 管理分頁只顯示 active（tasks 現在含 archived，供歷程使用）。
+  const activeTasks = useMemo(
+    () => tasks.filter((tw) => tw.task.status === 'active'),
+    [tasks]
+  );
   const filteredTasks = useMemo(() => {
-    if (!filterChild) return tasks;
-    return tasks.filter((tw) =>
+    if (!filterChild) return activeTasks;
+    return activeTasks.filter((tw) =>
       tw.instances.some((i) => i.userId === filterChild)
     );
-  }, [tasks, filterChild]);
+  }, [activeTasks, filterChild]);
 
   const activeCount = filteredTasks.length;
 
@@ -244,7 +255,8 @@ export default function ParentTasks() {
         <View style={styles.header}>
           <Label color={P.muted}>任務</Label>
           <Display style={{ marginTop: 2 }}>
-            {tab === 'manage' ? `${activeCount} 個任務在跑` : '過去 7 天'}
+            {/* R2-21(R2-08 審查)：歷程列的是全部審核紀錄，不是七天視窗，標題改成相符文字 */}
+            {tab === 'manage' ? `${activeCount} 個任務在跑` : '完成歷程'}
           </Display>
 
           <View style={styles.segment}>
@@ -278,7 +290,7 @@ export default function ParentTasks() {
               style={[styles.filterPill, !filterChild && styles.filterPillOn]}
             >
               <Label style={[styles.filterPillLabel, !filterChild && styles.filterPillLabelOn]}>
-                全部 · {tasks.length}
+                全部 · {activeTasks.length}
               </Label>
             </Pressable>
             {children.map((c) => (
@@ -443,7 +455,10 @@ export default function ParentTasks() {
                         fontWeight: '700',
                       }}
                     >
-                      ★ {task.points}
+                      {/* 已核准顯示當時實際發出的點數；之後改任務點數不會竄改歷史 */}
+                      ★ {instance.status === 'approved'
+                        ? instance.pointsAwarded ?? task.points
+                        : task.points}
                     </Data>
                   </View>
                 ))
@@ -505,7 +520,10 @@ function CreateTaskModal({
   // assignee userId → 永久 childId（點數釘 childId）；找不到退回 userId
   const childIdOf = (assigneeUserId: string) =>
     children.find((c) => c.id === assigneeUserId)?.childId ?? assigneeUserId;
-  const [saving, setSaving] = useState(false); // 防連點：多筆網路寫入期間鎖住送出
+  const [saving, setSaving] = useState(false); // 防連點：多筆網路寫入期間鎖住送出（UI 顯示用）
+  // R2-21(P2)：state 更新是非同步的，快速連點兩下可能都讀到 saving=false 而雙重送出；
+  // 用 ref 同步上鎖封死這個縫隙（saving state 仍保留給按鈕文字/disabled 顯示）。
+  const savingRef = useRef(false);
   const [form, setForm] = useState({
     title: '',
     points: '10',
@@ -552,9 +570,9 @@ function CreateTaskModal({
         points: String(t.points),
         // editing.instances 現在來自即時的 instByTask 訂閱（見上方 tasks useMemo），
         // 不再是開卡片當下的一次性快照 —— 指派給才會正確預填。
-        selectedChildren: editing.instances
-          .map((i) => i.userId)
-          .filter((v, i, a) => a.indexOf(v) === i),
+        // missed（被移除/三振）不預選：家長重新勾選才代表要復活，
+        // 否則只改標題儲存也會把移除過的孩子偷偷加回來。
+        selectedChildren: assignedUserIds(editing.instances),
         frequency: t.frequency,
         reviewMode: t.reviewMode,
         graceDays: String(t.graceDays ?? 2),
@@ -632,80 +650,140 @@ function CreateTaskModal({
 
   const handleCreate = async () => {
     if (!familyId || !uid || !form.title.trim()) return;
-    if (saving) return; // 防連點：避免重複建立任務與重複 instances
+    if (savingRef.current) return; // 防連點：避免重複建立任務與重複 instances（同步鎖，見 savingRef 註解）
+    // 「自動指派第一個孩子」的 fallback 只給新增模式用。編輯模式不能有：
+    // missed 不預選（見 assignedUserIds），全 missed 任務開編輯時選擇是空的，
+    // fallback 會在「只改標題」時偷偷復活 missed instance、甚至把任務改派給
+    // children[0]（訂閱無 orderBy，順序任意）這個無關的孩子。
     const assignees =
       form.selectedChildren.length > 0
         ? form.selectedChildren
-        : children.length > 0
+        : !editing && children.length > 0
         ? [children[0].id]
         : [];
-    if (assignees.length === 0) {
+    if (!editing && assignees.length === 0) {
       Alert.alert('錯誤', '請先新增孩子到家庭');
       return;
     }
+    if (editing && assignees.length === 0) {
+      if (assignedUserIds(editing.instances).length > 0) {
+        // 家長主動把指派中的孩子全取消勾選 → 語意不明（要移除全部？），擋下請明確選擇
+        Alert.alert('錯誤', '請至少選擇一位孩子');
+        return;
+      }
+      // 原本就沒有指派中的孩子（全 missed）→ 視為維持現狀：
+      // 只更新任務欄位，不動指派（下方 planAssignmentChanges 對空 assignees + 全 missed 產出空計畫）
+    }
+    // R2-21(R2-17 審查)：點數最後防線——parseInt 後 NaN（清空欄位）或 <1 一律擋下，
+    // 負數/零點數不得寫進 Firestore（輸入端已限純數字，這裡防貼上/程式化輸入）。
+    const points = parseInt(form.points, 10);
+    if (!Number.isFinite(points) || points < 1) {
+      Alert.alert('錯誤', '點數請填 1 以上的整數');
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     try {
       const now = firestore.Timestamp.now();
-      const periodEnd = getPeriodEnd();
-      const dueDate = firestore.Timestamp.fromDate(periodEnd);
       const graceDays = parseInt(form.graceDays) || 2;
-      const gracePeriodEnd = firestore.Timestamp.fromDate(
-        new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
-      );
 
       if (editing) {
-        // 編輯模式：更新 task 欄位 + 對帳 instances（加/移除指派的孩子）
+        // 編輯模式：只有「頻率真的改變」才重算截止日，否則沿用既有 dueDate——
+        // 避免只改標題、點數等小編輯也把截止日不斷往後漂。
+        const freqChanged = editing.task.frequency !== form.frequency;
+        const prevDue: Date =
+          typeof (editing.task.dueDate as any)?.toDate === 'function'
+            ? (editing.task.dueDate as any).toDate()
+            : new Date();
+        const periodEnd = freqChanged ? getPeriodEnd() : prevDue;
+        const dueDate = firestore.Timestamp.fromDate(periodEnd);
+        const gracePeriodEnd = firestore.Timestamp.fromDate(
+          new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
+        );
+
+        // 更新 task 欄位 + 對帳 instances（加/移除指派的孩子）
         await firestore().collection('tasks').doc(editing.task.id).update({
           title: form.title.trim(),
-          points: parseInt(form.points) || 10,
+          points,
           frequency: form.frequency,
           dueDate,
           graceDays,
           reviewMode: form.reviewMode,
-          assigneeType: assignees.length > 1 ? 'family' : 'individual',
-          assigneeUserId: assignees.length === 1 ? assignees[0] : null,
+          // 空選擇（全 missed 維持現狀）不覆寫指派欄位，避免 assigneeUserId 被清成 null
+          ...(assignees.length > 0
+            ? {
+                assigneeType: assignees.length > 1 ? 'family' : 'individual',
+                assigneeUserId: assignees.length === 1 ? assignees[0] : null,
+              }
+            : {}),
         });
-        // 去重表同樣吃即時的 editing.instances（來自 instByTask），
+        // 對帳計畫（純函式，見 lib/taskAssignments）：吃即時的 editing.instances（來自 instByTask），
         // 不會把既有指派誤判為新指派而重複 add() 一份 instance。
-        const existingByUser = new Map(
-          editing.instances.map((i) => [i.userId, i])
-        );
-        // 新增的孩子 → 建新 pending instance
-        for (const childId of assignees) {
-          if (!existingByUser.has(childId)) {
-            await firestore().collection('taskInstances').add({
-              taskId: editing.task.id,
-              userId: childId,
-              childId: childIdOf(childId),
-              familyId,
-              periodStart: now,
-              periodEnd: dueDate,
-              gracePeriodEnd,
-              status: 'pending',
-              submissionCount: 0,
-              reviewedBy: null,
-              reviewedAt: null,
-              pointsAwarded: null,
-            });
-          }
+        const plan = planAssignmentChanges(editing.instances, assignees, freqChanged);
+        // 全新指派的孩子 → 建新 pending instance
+        for (const childId of plan.createFor) {
+          await firestore().collection('taskInstances').add({
+            taskId: editing.task.id,
+            userId: childId,
+            childId: childIdOf(childId),
+            familyId,
+            periodStart: now,
+            periodEnd: dueDate,
+            gracePeriodEnd,
+            status: 'pending',
+            submissionCount: 0,
+            reviewedBy: null,
+            reviewedAt: null,
+            pointsAwarded: null,
+          });
         }
-        // 被移除的孩子 → instance 標 missed（保留歷史，不刪）
-        for (const inst of editing.instances) {
-          if (!assignees.includes(inst.userId) && inst.status !== 'missed') {
-            await firestore()
-              .collection('taskInstances')
-              .doc(inst.id)
-              .update({ status: 'missed' });
-          }
+        // missed（被移除/三振）的孩子重新勾選 → 復活成 pending 並重設本期期限與審核欄位，
+        // 否則永遠卡在 missed、小孩看不到任務。
+        for (const inst of plan.revive) {
+          await firestore().collection('taskInstances').doc(inst.id).update({
+            status: 'pending',
+            periodStart: now,
+            periodEnd: dueDate,
+            gracePeriodEnd,
+            submissionCount: 0,
+            reviewedBy: null,
+            reviewedAt: null,
+            pointsAwarded: null,
+          });
+        }
+        // 頻率改變 → 同步「進行中」instance 的期限（不動已核准的歷史）
+        for (const inst of plan.syncPeriod) {
+          await firestore().collection('taskInstances').doc(inst.id).update({
+            periodEnd: dueDate,
+            gracePeriodEnd,
+          });
+        }
+        // 被移除的孩子 → 只把「進行中」的 instance 標 missed（保留歷史，不刪）；
+        // approved 是點數帳本對應的歷史，覆寫會毀掉紀錄。
+        for (const inst of plan.markMissed) {
+          await firestore()
+            .collection('taskInstances')
+            .doc(inst.id)
+            .update({ status: 'missed' });
         }
         onClose();
         return;
       }
 
-      const taskRef = await firestore().collection('tasks').add({
+      const periodEnd = getPeriodEnd();
+      const dueDate = firestore.Timestamp.fromDate(periodEnd);
+      const gracePeriodEnd = firestore.Timestamp.fromDate(
+        new Date(periodEnd.getTime() + graceDays * 24 * 60 * 60 * 1000)
+      );
+      // R2-21(P2)：任務＋instances 用單一 batch 原子提交。原本先 add task 再逐筆
+      // await add instance，tasks 訂閱先收到新任務時卡片會短暫閃 0/0（自癒但閃現）；
+      // 中途失敗還會留下沒有任何 instance 的孤兒任務。batch 讓兩者同時落地。
+      const taskRef = firestore().collection('tasks').doc();
+      const batch = firestore().batch();
+      batch.set(taskRef, {
         familyId,
         title: form.title.trim(),
-        points: parseInt(form.points) || 10,
+        points,
         frequency: form.frequency,
         startDate: now,
         dueDate,
@@ -718,7 +796,7 @@ function CreateTaskModal({
         createdAt: now,
       });
       for (const childId of assignees) {
-        await firestore().collection('taskInstances').add({
+        batch.set(firestore().collection('taskInstances').doc(), {
           taskId: taskRef.id,
           userId: childId,
           childId: childIdOf(childId),
@@ -733,6 +811,7 @@ function CreateTaskModal({
           pointsAwarded: null,
         });
       }
+      await batch.commit();
       setForm({
         title: '',
         points: '10',
@@ -748,6 +827,7 @@ function CreateTaskModal({
     } catch (e: any) {
       Alert.alert(editing ? '儲存失敗' : '建立失敗', e?.message || '不明錯誤');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -813,8 +893,13 @@ function CreateTaskModal({
                   placeholder="10"
                   placeholderTextColor={P.muted}
                   value={form.points}
-                  onChangeText={(points) => setForm((s) => ({ ...s, points }))}
+                  onChangeText={(v) => {
+                    // R2-21(R2-17 審查)：只留數字——擋負號/小數點/貼上的非數字（同 dueDays 慣例）
+                    const points = v.replace(/[^0-9]/g, '');
+                    setForm((s) => ({ ...s, points }));
+                  }}
                   keyboardType="numeric"
+                  maxLength={4}
                 />
 
                 <Label color={P.muted} style={{ marginTop: spacing.md }}>

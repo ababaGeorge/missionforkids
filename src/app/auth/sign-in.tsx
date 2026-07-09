@@ -15,6 +15,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import auth from '@react-native-firebase/auth';
 import { useRouter } from 'expo-router';
+import { registerParent } from '../../lib/auth/registerParent';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { P, spacing, radius, shadow } from '../../design/tokens';
 import { Starfield } from '../../design/Starfield';
@@ -39,6 +40,9 @@ function mapAuthErrorMessage(code: string | undefined, isSignUp: boolean): strin
     case 'auth/wrong-password':
     case 'auth/user-not-found':
       return '帳號或密碼不對，再檢查一下';
+    // registerParent 孤兒帳號恢復路徑：email 已註冊但恢復登入密碼不符
+    case 'auth/email-taken-password-mismatch':
+      return '這個 Email 已經註冊過但密碼不符，請改用原密碼登入，或用忘記密碼重設';
     case 'auth/invalid-email':
       return 'Email 格式不對';
     case 'auth/too-many-requests':
@@ -94,7 +98,8 @@ export default function SignIn() {
     if (!email.trim() || !password || !displayName.trim() || !familyName.trim()) return;
     try {
       setLoading(true);
-      const { registerParent } = await import('../../lib/auth/registerParent');
+      // 靜態 import（同 invite 頁 registerChild 慣例）：動態 import 在 jest 環境
+      // 會炸 ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING_FLAG，錯誤映射無法被測試覆蓋。
       await registerParent({
         email: email.trim(),
         password,
@@ -103,7 +108,44 @@ export default function SignIn() {
       });
       router.replace('/');
     } catch (e: any) {
-      setErrorMsg(mapAuthErrorMessage(e?.code, true));
+      // CF 訊息碼用 message 比對（同 invite 頁慣例）：既有小孩帳號經孤兒恢復路徑
+      // 打到 bootstrapParentAccount 會被擋（ALREADY_CHILD），給明確文案而非通用註冊失敗。
+      if (/ALREADY_CHILD/.test(e?.message ?? '')) {
+        setErrorMsg('這個 Email 是小孩帳號，不能用來註冊家長，請改用其他 Email');
+      } else {
+        setErrorMsg(mapAuthErrorMessage(e?.code, true));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // R2-32：忘記密碼最小流程。用 Firebase 內建自助重設（sendPasswordResetEmail），
+  // 不做家長代重設（專案決策）。user-not-found 沿用成功文案，避免帳號枚舉。
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailEmptyEmail'));
+      return;
+    }
+    try {
+      setLoading(true);
+      await auth().sendPasswordResetEmail(trimmedEmail);
+      Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailSent'));
+    } catch (e: any) {
+      switch (e?.code) {
+        case 'auth/user-not-found':
+          // 中性訊息：跟成功走同一文案，不透露帳號是否存在
+          Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailSent'));
+          break;
+        case 'auth/invalid-email':
+        case 'auth/too-many-requests':
+        case 'auth/network-request-failed':
+          Alert.alert(t('auth.forgotPassword'), mapAuthErrorMessage(e.code, false));
+          break;
+        default:
+          Alert.alert(t('auth.forgotPassword'), t('auth.resetEmailFailed'));
+      }
     } finally {
       setLoading(false);
     }
@@ -177,6 +219,13 @@ export default function SignIn() {
                     }}
                     style={styles.input}
                   />
+                  {authMode === 'signin' && (
+                    <Pressable testID="forgot-password" onPress={handleForgotPassword}>
+                      <BodySm style={{ color: P.muted, textAlign: 'right' }}>
+                        {t('auth.forgotPassword')}
+                      </BodySm>
+                    </Pressable>
+                  )}
                   {authMode === 'signup' && (
                     <>
                       <TextInput
@@ -356,7 +405,8 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   errorText: {
-    color: '#FF6B6B',
+    // R2-21(P7)：literal #FF6B6B 改用 tokens 內最接近的警示色（accentHot #FF6B47）
+    color: P.accentHot,
     fontSize: 13,
   },
   appleButton: {

@@ -53,6 +53,7 @@ export default function ChildRewards() {
   const [items, setItems] = useState<RewardItem[]>([]);
   const [wallet, setWallet] = useState<PointWallet | null>(null);
   const [orders, setOrders] = useState<RewardOrder[]>([]);
+  const [archivedItem, setArchivedItem] = useState<RewardItem | null>(null);
 
   useEffect(() => {
     if (!uid) return;
@@ -101,7 +102,6 @@ export default function ChildRewards() {
       .collection('rewardOrders')
       .where('childId', '==', childId)
       .where('familyId', '==', familyId)
-      .limit(20)
       .onSnapshot((snap) => {
         if (!snap) return;
         const list = snap.docs.map(
@@ -112,7 +112,6 @@ export default function ChildRewards() {
           const bt = (b as any).createdAt?.toMillis?.() || 0;
           return bt - at;
         });
-        console.log('[ChildRewards] orders fetched:', list.map((o) => ({ id: o.id, status: o.status, itemId: o.itemId })));
         setOrders(list);
       }, (err) => console.warn('[ChildRewards] orders error:', (err as any)?.code));
     return unsub;
@@ -130,9 +129,37 @@ export default function ChildRewards() {
     return { activeOrder: active, history: hist };
   }, [orders]);
 
-  const activeItem = activeOrder
+  // 進行中訂單的品項可能已被家長封存（不在 active 清單）——
+  // 此時直接抓該品項 doc 作 fallback，否則橫幅消失、shop 又被訂單鎖住，小孩永遠無法取消。
+  const activeItemInList = activeOrder
     ? items.find((i) => i.id === activeOrder.itemId)
     : undefined;
+  const activeOrderItemId = activeOrder?.itemId;
+
+  useEffect(() => {
+    if (!activeOrderItemId || activeItemInList) {
+      setArchivedItem(null);
+      return;
+    }
+    let alive = true;
+    firestore()
+      .collection('rewardItems')
+      .doc(activeOrderItemId)
+      .get()
+      .then((d) => {
+        if (alive && d.exists()) {
+          setArchivedItem({ id: d.id, ...d.data() } as RewardItem);
+        }
+      })
+      .catch((err) => console.warn('[ChildRewards] archived item error:', (err as any)?.code));
+    return () => {
+      alive = false;
+    };
+  }, [activeOrderItemId, activeItemInList]);
+
+  const activeItem =
+    activeItemInList ??
+    (archivedItem?.id === activeOrderItemId ? archivedItem : undefined);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

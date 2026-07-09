@@ -23,7 +23,11 @@
     "signOut": "Sign Out",
     "welcome": "Welcome to Mission for Kids",
     "parentSignIn": "Parent Sign In",
-    "join": "Join"
+    "join": "Join",
+    "forgotPassword": "Forgot password?",
+    "resetEmailSent": "Reset email sent. Please check your inbox.",
+    "resetEmailEmptyEmail": "Please enter your email first",
+    "resetEmailFailed": "Couldn't send the reset email. Please try again later."
   },
   "family": {
     "createFamily": "Create Family",

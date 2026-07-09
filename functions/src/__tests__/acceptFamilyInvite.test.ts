@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import functionsTest from 'firebase-functions-test';
 import { acceptFamilyInvite } from '../acceptFamilyInvite';
 
@@ -19,8 +20,8 @@ async function seedInvite(
     status: 'pending',
     childProfile: { displayName: '小明', nickname: '阿明', avatarEmoji: '🦊' },
     acceptedBy: null,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 86400000),
+    createdAt: FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 86400000),
     ...overrides,
   });
 }
@@ -89,7 +90,7 @@ describe('acceptFamilyInvite', () => {
 
   it('invite 已過期 → failed-precondition INVITE_EXPIRED', async () => {
     await seedInvite('inv-3', 'fam-3', {
-      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+      expiresAt: Timestamp.fromMillis(Date.now() - 1000),
     });
     await expect(
       fft.wrap(acceptFamilyInvite)({
@@ -132,5 +133,126 @@ describe('acceptFamilyInvite', () => {
         auth: { uid: 'wrong-kid', token: { email: 'someone-else@example.com' } },
       } as any)
     ).rejects.toThrow(/INVITE_EMAIL_MISMATCH/);
+  });
+
+  it('重複接受第二張邀請 → 錢包餘額不歸零、暱稱不被覆寫、invite 標 accepted', async () => {
+    const uid = 'child-uid-7';
+    const familyId = 'fam-7';
+    await seedInvite('inv-7a', familyId);
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-7a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    const db = admin.firestore();
+    // 模擬小孩已賺到 20 點
+    await db.collection('pointWallets').doc(`${familyId}_${uid}`).update({ balance: 20 });
+
+    // 家長對同一 email 再開一張邀請（帶不同 childProfile）
+    await seedInvite('inv-7b', familyId, {
+      childProfile: { displayName: '新名字', nickname: '新暱稱', avatarEmoji: '🐰' },
+    });
+    const res: any = await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-7b' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+    expect(res).toEqual({ familyId, childId: uid });
+
+    const walletDoc = await db.collection('pointWallets').doc(`${familyId}_${uid}`).get();
+    expect(walletDoc.data()!.balance).toBe(20); // 絕不重設
+
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ nickname: '阿明', avatarEmoji: '🦊', status: 'active' });
+
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()!.displayName).toBe('小明');
+
+    const invDoc = await db.collection('familyInvites').doc('inv-7b').get();
+    expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
+  });
+
+  it('被移除的成員重新受邀 → membership 回 active、childId 不變、餘額保留、invite 標 accepted', async () => {
+    const uid = 'child-uid-9';
+    const familyId = 'fam-9';
+    await seedInvite('inv-9a', familyId);
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-9a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    const db = admin.firestore();
+    // 小孩已賺到 20 點，之後被家長移除（family.tsx 的移除只改 status）
+    await db.collection('pointWallets').doc(`${familyId}_${uid}`).update({ balance: 20 });
+    await db.collection('familyMemberships').doc(`${uid}_${familyId}`).update({ status: 'removed' });
+
+    // 家長對同一 email 再開一張邀請
+    await seedInvite('inv-9b', familyId);
+    const res: any = await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-9b' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+    expect(res).toEqual({ familyId, childId: uid });
+
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ status: 'active', childId: uid, userId: uid });
+
+    const walletDoc = await db.collection('pointWallets').doc(`${familyId}_${uid}`).get();
+    expect(walletDoc.data()!.balance).toBe(20); // 點數保留
+
+    const invDoc = await db.collection('familyInvites').doc('inv-9b').get();
+    expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
+  });
+
+  it('legacy 家長（doc id ≠ uid、authProviderId 匹配）接受 child 邀請 → ALREADY_PARENT，不遮蔽', async () => {
+    const uid = 'legacy-parent-auth-uid-1';
+    const db = admin.firestore();
+    // legacy 資料：doc id 不等於 auth uid，靠 authProviderId 對回本人
+    await db.collection('users').doc('legacy-parent-doc-1').set({
+      displayName: '老爸',
+      roleType: 'parent',
+      authProvider: 'password',
+      authProviderId: uid,
+      email: 'kid@example.com',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    await seedInvite('inv-10', 'fam-10');
+
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-10' },
+        auth: { uid, token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/ALREADY_PARENT/);
+
+    // 不得建立 users/{uid} 遮蔽 legacy parent doc；invite 也不應被消耗
+    const shadowDoc = await db.collection('users').doc(uid).get();
+    expect(shadowDoc.exists).toBe(false);
+    const invDoc = await db.collection('familyInvites').doc('inv-10').get();
+    expect(invDoc.data()!.status).toBe('pending');
+  });
+
+  it('家長帳號接受 child 邀請 → failed-precondition ALREADY_PARENT，user doc 不被改寫', async () => {
+    const uid = 'parent-uid-8';
+    const db = admin.firestore();
+    await db.collection('users').doc(uid).set({
+      displayName: '家長',
+      roleType: 'parent',
+      email: 'kid@example.com',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    await seedInvite('inv-8', 'fam-8');
+
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-8' },
+        auth: { uid, token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/ALREADY_PARENT/);
+
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()).toMatchObject({ displayName: '家長', roleType: 'parent' });
+
+    const invDoc = await db.collection('familyInvites').doc('inv-8').get();
+    expect(invDoc.data()!.status).toBe('pending'); // 不應被標 accepted
   });
 });

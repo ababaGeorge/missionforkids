@@ -39,6 +39,13 @@ service cloud.firestore {
         get(/databases/$(database)/documents/familyMemberships/$(request.auth.uid + '_' + familyId)).data.status == 'active';
     }
 
+    // update 專用：這次寫入「值真的有變」的欄位集合。
+    // 用 diff() 而非逐欄等式比較——舊 doc 缺欄位時等式會 error→誤擋，
+    // diff 只看被動到的欄位（R1 快照釘法同款理由，R2-CX1 推廣成通用白名單）。
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
     // ========== Users ==========
     // get：放行已登入者讀單一 doc（家長需用 uid 直查小孩 user doc 顯示名字；
     //      uid 已無法被枚舉——familyMemberships list 已鎖，外人拿不到其他家庭的 uid）。
@@ -103,23 +110,76 @@ service cloud.firestore {
     }
 
     // ========== Task Instances ==========
-    // A1 核心修復：核准（→approved/rejected/missed）只有家長能做；
-    // 小孩只能把狀態推到 submitted/pending（提交/重拍），永遠碰不到 approved → 無法自我發點。
+    // A1 核心修復 + R2-CX1 狀態機（防禦縱深）：
+    // R2 的交易守衛（updateInstanceIfStatusIn）只存在於新版 client——舊版 App 或
+    // 直打 API 的 client 仍可裸 update。這裡把合法流轉矩陣直接編進 rules：
+    // 不在矩陣內的 status 流轉一律拒絕，且每種流轉只准動白名單內的欄位
+    // （changedKeys ⊆ 白名單 → 身分欄位 taskId/userId/childId/familyId 與
+    // 點數欄位 pointsAwarded 天然被鎖，不用再逐欄等式釘）。
+    //
+    // 合法流轉矩陣（盤點自 src/ 全部 client 寫入點；詳見 R2-CX1 commit body）：
+    //   家長  submitted → approved|rejected|missed   審核/三振（review.tsx）
+    //         pending|rejected → missed              編輯移除（tasks.tsx markMissed）
+    //         missed → pending                       復活（tasks.tsx revive，點數必須維持 null）
+    //         status 不變，只動期限                    頻率改變同步（tasks.tsx syncPeriod）
+    //   小孩  pending|rejected → submitted            提交（task/[id].tsx batch）
+    //         rejected → pending                     重試/重拍（task/[id].tsx handleRetry）
+    //   approved 是 client 終態（發點歷史）：任何 client 都不可再改。
+    //   CF（admin SDK）不受本規則限制：發點回寫 pointsAwarded、週期任務自動生成。
     match /taskInstances/{instanceId} {
       allow read: if isFamilyMember(resource.data.familyId);
-      // 建 instance 只有家長（發佈任務時）。週期任務未來由 CF(admin) 自動生成。
-      allow create: if isFamilyParent(request.resource.data.familyId);
+      // 建 instance 只有家長（發佈任務時），且必須以 pending 出生、不得預埋點數
+      // （擋「出生即 approved」繞過狀態機）。週期任務未來由 CF(admin) 自動生成。
+      allow create: if isFamilyParent(request.resource.data.familyId)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('pointsAwarded', null) == null;
       allow update: if isFamilyMember(resource.data.familyId) && (
-        // 家長：可做審核狀態流轉（approve/reject/missed）
-        isFamilyParent(resource.data.familyId)
-        ||
-        // 非家長成員（小孩）：只能 submit/pending，且不可動 pointsAwarded / 身分欄位
         (
-          request.resource.data.status in ['submitted', 'pending']
-          && request.resource.data.familyId == resource.data.familyId
-          && request.resource.data.taskId == resource.data.taskId
-          && request.resource.data.userId == resource.data.userId
-          && request.resource.data.get('pointsAwarded', null) == resource.data.get('pointsAwarded', null)
+          // ---- 家長 ----
+          isFamilyParent(resource.data.familyId) && (
+            // 審核：submitted → approved / rejected / missed(三振)
+            (
+              resource.data.status == 'submitted'
+              && request.resource.data.status in ['approved', 'rejected', 'missed']
+              && changedKeys().hasOnly(['status', 'reviewedBy', 'reviewedAt', 'parentNote'])
+            )
+            ||
+            // 編輯移除：pending / rejected → missed（submitted→missed 已含在審核條款）
+            (
+              resource.data.status in ['pending', 'rejected']
+              && request.resource.data.status == 'missed'
+              && changedKeys().hasOnly(['status'])
+            )
+            ||
+            // 復活：missed → pending（重設本期期限與審核欄位；pointsAwarded 只准維持 null）
+            (
+              resource.data.status == 'missed'
+              && request.resource.data.status == 'pending'
+              && changedKeys().hasOnly(['status', 'periodStart', 'periodEnd', 'gracePeriodEnd',
+                                        'submissionCount', 'reviewedBy', 'reviewedAt', 'pointsAwarded'])
+              && request.resource.data.get('pointsAwarded', null) == null
+            )
+            ||
+            // 期限同步（頻率改變）：status 不變，只動期限欄位
+            changedKeys().hasOnly(['periodEnd', 'gracePeriodEnd'])
+          )
+        )
+        ||
+        (
+          // ---- 非家長成員（小孩）----
+          // 提交：pending / rejected → submitted（batch 同步寫計數與時間）
+          (
+            resource.data.status in ['pending', 'rejected']
+            && request.resource.data.status == 'submitted'
+            && changedKeys().hasOnly(['status', 'submissionCount', 'submittedAt'])
+          )
+          ||
+          // 重試/重拍：rejected → pending
+          (
+            resource.data.status == 'rejected'
+            && request.resource.data.status == 'pending'
+            && changedKeys().hasOnly(['status'])
+          )
         )
       );
     }
@@ -159,7 +219,23 @@ service cloud.firestore {
     }
 
     // ========== Reward Orders ==========
-    // A6 修復：核准（→approved）只有家長；小孩只能建單(pending)、確認收到(→completed)、取消(pending→cancelled)。
+    // A6 修復 + R2-CX1 狀態機（防禦縱深）：
+    // R2 的交易守衛（updateOrderIfStatusIn）只存在於新版 client——舊版 App 或
+    // 直打 API 的 client 仍可裸 update（例：cancelled→approved = 退款已發生還免費領獎）。
+    // 這裡把合法流轉矩陣直接編進 rules，每種流轉配欄位白名單（changedKeys ⊆ 白名單）：
+    // 身分/金額欄位（familyId/itemId/userId/childId/pointCostSnapshot）與 CF 權威快照
+    // （balanceBeforeSnapshot/balanceAfterSnapshot，R1/P8 對帳用）不在任何白名單 → 天然被鎖，
+    // 取代原本的逐欄等式釘（等式對缺欄位的舊訂單會 error→誤擋，diff/白名單沒這問題）。
+    //
+    // 合法流轉矩陣（盤點自 src/ 全部 client 寫入點；詳見 R2-CX1 commit body）：
+    //   家長  pending → approved                     核准（review.tsx）
+    //         pending → rejected                     婉拒（review.tsx；退款 CF 對 rejected 觸發）
+    //         approved → delivered                   交付（rewards.tsx）
+    //   小孩  approved|delivered → completed          確認收到（order/[id].tsx）
+    //         pending → cancelled                    取消（order/[id].tsx；退款 CF 觸發）
+    //   cancelled / rejected / completed 是 client 終態：任何 client 都不可再改
+    //   （擋「退款後改回 approved 免費領獎」）。CF/admin（扣款快照回寫、autoComplete、
+    //   餘額不足改 rejected）不受本規則限制。
     match /rewardOrders/{orderId} {
       allow read: if isFamilyMember(resource.data.familyId);
       // 小孩建自己的訂單，初始 pending。
@@ -171,32 +247,48 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && !request.resource.data.keys().hasAny(['balanceBeforeSnapshot', 'balanceAfterSnapshot']);
       allow update: if isFamilyMember(resource.data.familyId) && (
-        // 家長：核准 / 拒絕 / 交付。balanceBeforeSnapshot/balanceAfterSnapshot（P8：
-        // 扣款當下餘額快照，對帳用）只有 onRewardOrderCreated CF（admin SDK）能寫，
-        // 家長 client 端 update 一律不可動這兩欄——用 diff() 而非等式比較，
-        // 因為舊訂單（此欄位上線前建立）根本沒有這兩欄位，等式比較會因欄位不存在而 error→擋掉
-        // 家長既有的合法核准/拒絕/交付操作。diff() 只在「這兩欄位被動到」時才擋。
         (
-          isFamilyParent(resource.data.familyId)
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['balanceBeforeSnapshot', 'balanceAfterSnapshot'])
+          // ---- 家長 ----
+          isFamilyParent(resource.data.familyId) && (
+            // 核准：pending → approved
+            (
+              resource.data.status == 'pending'
+              && request.resource.data.status == 'approved'
+              && changedKeys().hasOnly(['status', 'approvedAt', 'parentNote'])
+            )
+            ||
+            // 婉拒：pending → rejected
+            (
+              resource.data.status == 'pending'
+              && request.resource.data.status == 'rejected'
+              && changedKeys().hasOnly(['status', 'parentNote'])
+            )
+            ||
+            // 交付：approved → delivered
+            (
+              resource.data.status == 'approved'
+              && request.resource.data.status == 'delivered'
+              && changedKeys().hasOnly(['status', 'deliveredAt', 'autoCompleteAt'])
+            )
+          )
         )
         ||
-        // 訂單擁有者（小孩）：金額/品項/身分不可變，且僅限兩種合法流轉
         (
-          resource.data.userId == request.auth.uid
-          && request.resource.data.pointCostSnapshot == resource.data.pointCostSnapshot
-          && request.resource.data.familyId == resource.data.familyId
-          && request.resource.data.itemId == resource.data.itemId
-          && request.resource.data.userId == resource.data.userId
-          // 同上：diff() 相容缺欄位的舊訂單，擋小孩在 pending→cancelled /
-          // approved|delivered→completed 這兩個合法流轉時順手竄改快照值。
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['balanceBeforeSnapshot', 'balanceAfterSnapshot'])
-          && (
-            // 確認收到：approved/delivered → completed
-            (resource.data.status in ['approved', 'delivered'] && request.resource.data.status == 'completed')
+          // ---- 訂單擁有者（小孩）----
+          resource.data.userId == request.auth.uid && (
+            // 確認收到：approved / delivered → completed
+            (
+              resource.data.status in ['approved', 'delivered']
+              && request.resource.data.status == 'completed'
+              && changedKeys().hasOnly(['status', 'completedAt'])
+            )
             ||
             // 取消（B5 真取消）：只能在 pending 取消，避免「領獎又退點」
-            (resource.data.status == 'pending' && request.resource.data.status == 'cancelled')
+            (
+              resource.data.status == 'pending'
+              && request.resource.data.status == 'cancelled'
+              && changedKeys().hasOnly(['status', 'cancelledAt'])
+            )
           )
         )
       );
