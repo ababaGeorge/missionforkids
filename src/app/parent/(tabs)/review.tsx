@@ -24,6 +24,10 @@ import type {
 import { useFamily } from '../../../hooks/useFamily';
 import { resolveMemberDisplay } from '../../../lib/memberName';
 import { updateOrderIfPending, ORDER_STALE_MESSAGES } from '../../../lib/orders';
+import {
+  updateInstanceIfStatusIn,
+  INSTANCE_STALE_MESSAGES,
+} from '../../../lib/instances';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -380,37 +384,46 @@ function ReviewTaskSheet({
 
   if (!item) return null;
 
+  // R2-FB：activeTask 是開 sheet 當下的凍結快照——期間另一位家長可能已把
+  // instance 標成 missed/已處理。改走交易守衛（前置狀態 {submitted}），
+  // stale 時比照 R2-04：友善訊息＋關 sheet 讓列表刷新。
   const handleApprove = async () => {
     try {
-      await firestore()
-        .collection('taskInstances')
-        .doc(item.instance.id)
-        .update({
-          status: 'approved',
-          reviewedBy: uid,
-          reviewedAt: firestore.FieldValue.serverTimestamp(),
-          ...(note.trim() ? { parentNote: note.trim() } : {}),
-        });
+      await updateInstanceIfStatusIn(item.instance.id, ['submitted'], {
+        status: 'approved',
+        reviewedBy: uid,
+        reviewedAt: firestore.FieldValue.serverTimestamp(),
+        ...(note.trim() ? { parentNote: note.trim() } : {}),
+      });
       onClose();
     } catch (e: any) {
+      const staleMsg = INSTANCE_STALE_MESSAGES[e?.message as string];
+      if (staleMsg) {
+        // 殘留卡片：關閉 sheet，列表交給 onSnapshot 刷新
+        Keyboard.dismiss();
+        onClose();
+        Alert.alert('通過失敗', staleMsg);
+        return;
+      }
       Alert.alert('通過失敗', e?.message || '不明錯誤');
     }
   };
 
   const handleReject = async () => {
-    const currentCount = item.instance.submissionCount || 0;
-    const newStatus = currentCount >= 3 ? 'missed' : 'rejected';
-    const updates: Record<string, any> = {
-      status: newStatus,
-      reviewedBy: uid,
-      reviewedAt: firestore.FieldValue.serverTimestamp(),
-    };
-    if (note.trim()) updates.parentNote = note.trim();
     try {
-      await firestore()
-        .collection('taskInstances')
-        .doc(item.instance.id)
-        .update(updates);
+      // R2-FB：三振計數改用交易內重讀的 submissionCount——凍結快照的舊值
+      // 可能少算次數，讓第 3 次退回沒被標成 missed。
+      await updateInstanceIfStatusIn(item.instance.id, ['submitted'], (data) => {
+        const currentCount = (data.submissionCount as number) || 0;
+        const newStatus = currentCount >= 3 ? 'missed' : 'rejected';
+        const updates: Record<string, any> = {
+          status: newStatus,
+          reviewedBy: uid,
+          reviewedAt: firestore.FieldValue.serverTimestamp(),
+        };
+        if (note.trim()) updates.parentNote = note.trim();
+        return updates;
+      });
       if (note.trim()) {
         await firestore()
           .collection('taskSubmissions')
@@ -420,6 +433,14 @@ function ReviewTaskSheet({
       Keyboard.dismiss();
       onClose();
     } catch (e: any) {
+      const staleMsg = INSTANCE_STALE_MESSAGES[e?.message as string];
+      if (staleMsg) {
+        // 殘留卡片：關閉 sheet，列表交給 onSnapshot 刷新
+        Keyboard.dismiss();
+        onClose();
+        Alert.alert('退回失敗', staleMsg);
+        return;
+      }
       Alert.alert('退回失敗', e?.message || '不明錯誤');
     }
   };
