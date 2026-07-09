@@ -12,6 +12,9 @@
  *     重複接受第二張邀請不歸零錢包。
  *   - R2-03：扣款 trigger 交易內重讀訂單，非 pending 不扣（防扣款-取消競態點數遺失）。
  *   - R2-13：grantPoints 回傳實際變動量 delta（clamp 時 |delta| < |amount|；冪等重放回 null）。
+ *   - R2-CX1：firestore.rules 編碼狀態機——舊版 client（沒有交易守衛）直打 Firestore 的
+ *     非法狀態流轉（cancelled→approved、pending→approved、missed→approved、竄改快照/點數欄位）
+ *     一律 PERMISSION_DENIED；合法流轉（revive、syncPeriod、正常審核）不受影響（第 16 節）。
  *
  * 跑法（從專案根目錄；會先 build functions）：
  *   npm --prefix functions run build && \
@@ -286,9 +289,12 @@ async function main() {
       status: 'completed', completedAt: serverTimestamp(),
     });
   });
-  await step('6.7 已完成訂單不再退款（守衛）', async () => {
-    // 家長把 completed 改 rejected（角色上可，但退款 CF 必須跳過）
-    await updateDoc(doc(P.db, 'rewardOrders', orderId), { status: 'rejected' });
+  await expectDenied('6.7 家長把 completed 改 rejected 被 rules 擋（R2-CX1 狀態機：completed 是終態）', () =>
+    updateDoc(doc(P.db, 'rewardOrders', orderId), { status: 'rejected' }));
+  await step('6.8 已完成訂單即使被改成 rejected 也不退款（CF 守衛縱深，admin 繞過 rules 重演）', async () => {
+    // R2-CX1 前這步用家長 client 寫（當時 rules 允許任意流轉）；現在 rules 已擋，
+    // 改用 admin 繞過 rules 直接竄改，證明退款 CF 的「已交付/完成不退款」守衛仍是第二道防線。
+    await adb.collection('rewardOrders').doc(orderId).update({ status: 'rejected' });
     await sleep(4000);
     const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
     if (w.data().balance !== 50) throw new Error(`餘額 ${w.data().balance}，退款守衛失效`);
@@ -568,6 +574,128 @@ async function main() {
     const r = await adb.collection('pointTransactions').doc(`reward_refund_${ref.id}`).get();
     if (w.data().balance !== 120) throw new Error(`餘額 ${w.data().balance} != 120（點數遺失）`);
     if (d.exists !== r.exists) throw new Error(`帳不成對：扣款=${d.exists} 退款=${r.exists}`);
+  });
+
+  // ========== 16. R2-CX1：rules 狀態機（防舊版 client / 直打 API 的非法狀態回寫）==========
+  // 模擬「沒有 R2 交易守衛的舊版 App」直接對 Firestore 發動的非法狀態流轉，
+  // 全部必須被 firestore.rules 的狀態機擋下（PERMISSION_DENIED）；
+  // 同時實測矩陣內的合法流轉（revive / syncPeriod / 正常審核）沒被擋錯。
+  // 進場餘額：120（15.3 結束時）。
+
+  // -- 訂單：cancelled 是終態（退款已發生，改回 approved = 免費領獎）--
+  await expectDenied('16.1 家長把已取消訂單改回 approved（退款已發生→免費領獎）', () =>
+    updateDoc(doc(P.db, 'rewardOrders', order2Id), {
+      status: 'approved', approvedAt: serverTimestamp(),
+    }));
+
+  // -- 任務 instance 狀態機 --
+  let task3Id, instance3Id;
+  await step('16.2 家長建第三個任務 instance（10 點，pending）', async () => {
+    const now = Timestamp.now();
+    const dueDate = Timestamp.fromMillis(Date.now() + 24 * 3600 * 1000);
+    const taskRef = await addDoc(collection(P.db, 'tasks'), {
+      familyId, title: '倒垃圾', points: 10, frequency: 'weekly',
+      startDate: now, dueDate, graceDays: 2, reviewMode: 'manual',
+      assigneeType: 'individual', assigneeUserId: kidUid,
+      status: 'active', createdBy: dadUid, createdAt: now,
+    });
+    task3Id = taskRef.id;
+    const instRef = await addDoc(collection(P.db, 'taskInstances'), {
+      taskId: task3Id, userId: kidUid, childId, familyId,
+      periodStart: now, periodEnd: dueDate, gracePeriodEnd: dueDate,
+      status: 'pending', submissionCount: 0,
+      reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+    });
+    instance3Id = instRef.id;
+  });
+  await expectDenied('16.3 家長未提交直接核准（pending → approved 不在矩陣）', () =>
+    updateDoc(doc(P.db, 'taskInstances', instance3Id), {
+      status: 'approved', reviewedBy: dadUid, reviewedAt: serverTimestamp(),
+    }));
+  await expectDenied('16.4 家長建 instance 直接出生 approved（create 必須 pending）', () =>
+    addDoc(collection(P.db, 'taskInstances'), {
+      taskId: task3Id, userId: kidUid, childId, familyId,
+      periodStart: Timestamp.now(), periodEnd: Timestamp.now(), gracePeriodEnd: Timestamp.now(),
+      status: 'approved', submissionCount: 0,
+      reviewedBy: dadUid, reviewedAt: serverTimestamp(), pointsAwarded: null,
+    }));
+  await step('16.5 家長標記 missed（編輯移除路徑 pending → missed，R2-08）', async () => {
+    await updateDoc(doc(P.db, 'taskInstances', instance3Id), { status: 'missed' });
+  });
+  await expectDenied('16.6 家長把 missed 打成 approved（missed → approved 不在矩陣）', () =>
+    updateDoc(doc(P.db, 'taskInstances', instance3Id), {
+      status: 'approved', reviewedBy: dadUid, reviewedAt: serverTimestamp(),
+    }));
+  await step('16.7 家長復活 missed instance（missed → pending，R2-08 revive）', async () => {
+    const now = Timestamp.now();
+    const dueDate = Timestamp.fromMillis(Date.now() + 7 * 24 * 3600 * 1000);
+    await updateDoc(doc(P.db, 'taskInstances', instance3Id), {
+      status: 'pending', periodStart: now, periodEnd: dueDate, gracePeriodEnd: dueDate,
+      submissionCount: 0, reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+    });
+  });
+  await step('16.8 家長同步期限（頻率改變 syncPeriod：status 不變只動期限）', async () => {
+    const dueDate = Timestamp.fromMillis(Date.now() + 14 * 24 * 3600 * 1000);
+    await updateDoc(doc(P.db, 'taskInstances', instance3Id), {
+      periodEnd: dueDate, gracePeriodEnd: dueDate,
+    });
+  });
+  await step('16.9 小孩提交第三任務（pending → submitted）', async () => {
+    const subRef = doc(collection(C.db, 'taskSubmissions'));
+    const batch = writeBatch(C.db);
+    batch.set(subRef, {
+      taskInstanceId: instance3Id, familyId, submittedBy: kidUid,
+      photoUrls: [], childNote: '倒了', aiResult: null, aiConfidence: null,
+      submittedAt: serverTimestamp(),
+    });
+    batch.update(doc(C.db, 'taskInstances', instance3Id), {
+      status: 'submitted', submissionCount: increment(1), submittedAt: serverTimestamp(),
+    });
+    await batch.commit();
+  });
+  await expectDenied('16.10 小孩把 submitted 拉回 pending（撤回提交不在矩陣）', () =>
+    updateDoc(doc(C.db, 'taskInstances', instance3Id), { status: 'pending' }));
+  await expectDenied('16.11 家長核准時夾帶竄改 pointsAwarded（欄位白名單擋）', () =>
+    updateDoc(doc(P.db, 'taskInstances', instance3Id), {
+      status: 'approved', reviewedBy: dadUid, reviewedAt: serverTimestamp(),
+      pointsAwarded: 99999,
+    }));
+  await step('16.12 攻擊未破壞正路徑：家長正常核准第三任務', async () => {
+    await updateDoc(doc(P.db, 'taskInstances', instance3Id), {
+      status: 'approved', reviewedBy: dadUid, reviewedAt: serverTimestamp(),
+    });
+  });
+  await waitFor('16.13 發點 120 → 130', async () => {
+    const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
+    return w.data().balance === 130;
+  });
+
+  // -- 訂單：家長 update 竄改快照欄位（R1 釘法在狀態機白名單下保持）--
+  let order4Id;
+  await step('16.14 小孩下第四單（50 點，pending）', async () => {
+    const ref = await addDoc(collection(C.db, 'rewardOrders'), {
+      familyId, itemId, userId: kidUid, childId,
+      pointCostSnapshot: 50, status: 'pending',
+      cancelledAt: null, approvedAt: null, deliveredAt: null,
+      completedAt: null, autoCompleteAt: null, createdAt: serverTimestamp(),
+    });
+    order4Id = ref.id;
+  });
+  await waitFor('16.15 扣點 130 → 80', async () => {
+    const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
+    return w.data().balance === 80;
+  });
+  await expectDenied('16.16 家長核准訂單時夾帶竄改 balanceAfterSnapshot', () =>
+    updateDoc(doc(P.db, 'rewardOrders', order4Id), {
+      status: 'approved', approvedAt: serverTimestamp(),
+      balanceAfterSnapshot: 99999,
+    }));
+  await expectDenied('16.17 家長不換狀態直接改 balanceBeforeSnapshot', () =>
+    updateDoc(doc(P.db, 'rewardOrders', order4Id), { balanceBeforeSnapshot: 99999 }));
+  await step('16.18 攻擊未破壞正路徑：家長正常核准第四單', async () => {
+    await updateDoc(doc(P.db, 'rewardOrders', order4Id), {
+      status: 'approved', approvedAt: serverTimestamp(),
+    });
   });
 
   // ---- 報告 ----
