@@ -128,6 +128,9 @@ export default function ChildTasks() {
         setTaskMap(map);
       }, (err) => {
         console.error('[ChildTasks] tasks snapshot error:', (err as any)?.code);
+        // 讀取失敗（斷網冷啟、被移出家庭後 permission-denied）也要讓載入閘落地，
+        // 否則 taskMap 停在 null 會永遠轉圈——降級成空清單而非卡死。
+        setTaskMap({});
       });
     return unsub;
   }, [familyId]);
