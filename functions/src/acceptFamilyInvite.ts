@@ -73,6 +73,20 @@ export const acceptFamilyInvite = onCall(async (request) => {
       throw new HttpsError('failed-precondition', 'ALREADY_PARENT');
     }
 
+    // R3-1：擋跨家庭雙 active membership——一個帳號同時只能屬於一個家庭。
+    // 過濾掉本邀請的 familyId：同家庭 reactivate（被移除後重新受邀）不受影響。
+    // 已 accepted 的冪等回傳在上方先行，不會被此守衛擋到。
+    // equality-only 查詢不需新複合索引；此 read 在所有 write 之前（transaction 規則）。
+    const activeMemsSnap = await tx.get(
+      db
+        .collection('familyMemberships')
+        .where('userId', '==', uid)
+        .where('status', '==', 'active')
+    );
+    if (activeMemsSnap.docs.some((d) => d.data()?.familyId !== familyId)) {
+      throw new HttpsError('failed-precondition', 'ALREADY_IN_FAMILY');
+    }
+
     const profile = invite.childProfile ?? {};
 
     // user doc：不存在才建（重複接受第二張邀請時不整份覆寫既有 profile）。

@@ -203,6 +203,57 @@ describe('acceptFamilyInvite', () => {
     expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
   });
 
+  // R3-1 補充：「無任何 membership → 過」由第一個案例覆蓋、「同家庭非 active reactivate → 過」
+  // 由上面 inv-9 案例覆蓋（兩者都會經過新守衛的查詢）。以下兩案例補跨家庭正反面。
+  it('R3-1：已是別的家庭 active 成員 → 接新家庭邀請被擋 ALREADY_IN_FAMILY，invite 不被消耗', async () => {
+    const uid = 'child-uid-11';
+    await seedInvite('inv-11a', 'fam-11a');
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-11a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    // 家庭 B 對同一 email 開邀請
+    await seedInvite('inv-11b', 'fam-11b');
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-11b' },
+        auth: { uid, token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/ALREADY_IN_FAMILY/);
+
+    const db = admin.firestore();
+    // 交易整體回滾：家庭 B 不得殘留 membership / 錢包，invite 維持 pending
+    const memB = await db.collection('familyMemberships').doc(`${uid}_fam-11b`).get();
+    expect(memB.exists).toBe(false);
+    const walletB = await db.collection('pointWallets').doc(`fam-11b_${uid}`).get();
+    expect(walletB.exists).toBe(false);
+    const invDoc = await db.collection('familyInvites').doc('inv-11b').get();
+    expect(invDoc.data()!.status).toBe('pending');
+  });
+
+  it('R3-1：舊家庭 membership 已 removed（非 active）→ 接新家庭邀請可過', async () => {
+    const uid = 'child-uid-12';
+    await seedInvite('inv-12a', 'fam-12a');
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-12a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    const db = admin.firestore();
+    await db.collection('familyMemberships').doc(`${uid}_fam-12a`).update({ status: 'removed' });
+
+    await seedInvite('inv-12b', 'fam-12b');
+    const res: any = await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-12b' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+    expect(res).toEqual({ familyId: 'fam-12b', childId: uid });
+
+    const memB = await db.collection('familyMemberships').doc(`${uid}_fam-12b`).get();
+    expect(memB.data()).toMatchObject({ status: 'active', familyId: 'fam-12b' });
+  });
+
   it('legacy 家長（doc id ≠ uid、authProviderId 匹配）接受 child 邀請 → ALREADY_PARENT，不遮蔽', async () => {
     const uid = 'legacy-parent-auth-uid-1';
     const db = admin.firestore();

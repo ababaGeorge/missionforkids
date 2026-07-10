@@ -27,7 +27,8 @@
     "forgotPassword": "Forgot password?",
     "resetEmailSent": "Reset email sent. Please check your inbox.",
     "resetEmailEmptyEmail": "Please enter your email first",
-    "resetEmailFailed": "Couldn't send the reset email. Please try again later."
+    "resetEmailFailed": "Couldn't send the reset email. Please try again later.",
+    "alreadyInFamily": "You already belong to another family. Leave it before joining a new one."
   },
   "family": {
     "createFamily": "Create Family",
