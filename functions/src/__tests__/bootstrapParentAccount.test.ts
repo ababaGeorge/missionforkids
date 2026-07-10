@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import functionsTest from 'firebase-functions-test';
 import { bootstrapParentAccount } from '../bootstrapParentAccount';
 
@@ -59,6 +60,40 @@ describe('bootstrapParentAccount', () => {
     expect(shadowDoc.exists).toBe(false);
     const fams = await db.collection('families').where('createdBy', '==', uid).get();
     expect(fams.size).toBe(0);
+  });
+
+  it('R3-2：已有任一家庭的 active membership → ALREADY_IN_FAMILY，不建 family 不寫 user doc', async () => {
+    const uid = 'member-uid-3';
+    const db = admin.firestore();
+    // 帳號已是某家庭的 active 成員（users doc 缺失的異常資料也要擋——守衛只看 membership）
+    await db.collection('familyMemberships').doc(`${uid}_fam-z`).set({
+      familyId: 'fam-z', userId: uid, role: 'child', status: 'active',
+      invitedBy: 'parent-x', joinedAt: FieldValue.serverTimestamp(),
+    });
+    await expect(
+      wrap()({ data: { displayName: '想開新家', familyName: '第二家庭' }, auth: { uid, token: { email: 'multi@example.com' } } } as any)
+    ).rejects.toThrow(/ALREADY_IN_FAMILY/);
+    // 交易整體回滾：不建 family、不建 users/{uid}
+    const fams = await db.collection('families').where('createdBy', '==', uid).get();
+    expect(fams.size).toBe(0);
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.exists).toBe(false);
+  });
+
+  it('R3-2：曾有 membership 但已 removed（非 active）→ 可建立新家庭', async () => {
+    const uid = 'member-uid-4';
+    const db = admin.firestore();
+    await db.collection('familyMemberships').doc(`${uid}_fam-old`).set({
+      familyId: 'fam-old', userId: uid, role: 'child', status: 'removed',
+      invitedBy: 'parent-x', joinedAt: FieldValue.serverTimestamp(),
+    });
+    const res: any = await wrap()({
+      data: { displayName: '重新開始', familyName: '新家庭' },
+      auth: { uid, token: { email: 'fresh@example.com' } },
+    } as any);
+    expect(res.familyId).toBeTruthy();
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${res.familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ role: 'parent', status: 'active' });
   });
 
   it('冪等：同一個 parent 再呼叫不會建第二個 family', async () => {

@@ -68,6 +68,24 @@ describe('SignIn email/密碼', () => {
     );
   });
 
+  // R3-2：一帳號一家庭守衛（i18n mock 讓 t 回傳 key 本身，斷言用 key 比對）
+  it('註冊模式：CF 拋 ALREADY_IN_FAMILY → 顯示已加入其他家庭的文案', async () => {
+    const { registerParent } = require('../../../lib/auth/registerParent');
+    registerParent.mockRejectedValue(new Error('ALREADY_IN_FAMILY'));
+
+    const { getByTestId } = render(<SignIn />);
+    fireEvent.press(getByTestId('toggle-auth-mode'));
+    fireEvent.changeText(getByTestId('email-input'), 'member@example.com');
+    fireEvent.changeText(getByTestId('password-input'), 'memberpass123');
+    fireEvent.changeText(getByTestId('displayname-input'), '成員');
+    fireEvent.changeText(getByTestId('familyname-input'), '第二家庭');
+    fireEvent.press(getByTestId('email-submit'));
+
+    await waitFor(() =>
+      expect(getByTestId('auth-error').props.children).toMatch(/alreadyInFamily/)
+    );
+  });
+
   // R2-32：忘記密碼最小流程（i18n mock 讓 t 回傳 key 本身，斷言用 key 比對）
   it('忘記密碼：有填 email 點擊會呼叫 sendPasswordResetEmail 並提示已寄出', async () => {
     const reset = (auth as any).__mocks.sendPasswordResetEmail;

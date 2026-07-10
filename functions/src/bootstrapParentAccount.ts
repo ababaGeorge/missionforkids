@@ -36,6 +36,18 @@ export const bootstrapParentAccount = onCall(async (request) => {
         throw new HttpsError('failed-precondition', 'ALREADY_CHILD');
       }
     }
+    // R3-2：建家庭前擋任何家庭的 active membership（不分角色）——一帳號一家庭。
+    // 既有 parent 的冪等短路在最前（roleType 檢查）已回傳既有 familyId，不會走到這裡。
+    // equality-only 查詢不需新複合索引；此 read 在所有 write 之前（transaction 規則）。
+    const activeMemsSnap = await tx.get(
+      db
+        .collection('familyMemberships')
+        .where('userId', '==', uid)
+        .where('status', '==', 'active')
+    );
+    if (!activeMemsSnap.empty) {
+      throw new HttpsError('failed-precondition', 'ALREADY_IN_FAMILY');
+    }
     const familyRef = db.collection('families').doc();
     tx.set(userRef, { displayName, avatarUrl: null, authProvider: 'password', authProviderId: uid, roleType: 'parent', email, birthday: null, createdAt: now });
     tx.set(familyRef, { displayName: familyName, defaultGraceDays: 2, createdBy: uid, createdAt: now });

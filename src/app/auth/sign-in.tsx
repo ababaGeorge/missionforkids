@@ -112,6 +112,9 @@ export default function SignIn() {
       // 打到 bootstrapParentAccount 會被擋（ALREADY_CHILD），給明確文案而非通用註冊失敗。
       if (/ALREADY_CHILD/.test(e?.message ?? '')) {
         setErrorMsg('這個 Email 是小孩帳號，不能用來註冊家長，請改用其他 Email');
+      } else if (/ALREADY_IN_FAMILY/.test(e?.message ?? '')) {
+        // R3-2：CF 擋「已有任一家庭 active membership 的帳號再建新家庭」（一帳號一家庭）
+        setErrorMsg(t('auth.alreadyInFamily'));
       } else {
         setErrorMsg(mapAuthErrorMessage(e?.code, true));
       }
