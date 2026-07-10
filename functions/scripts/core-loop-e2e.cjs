@@ -15,6 +15,8 @@
  *   - R2-CX1：firestore.rules 編碼狀態機——舊版 client（沒有交易守衛）直打 Firestore 的
  *     非法狀態流轉（cancelled→approved、pending→approved、missed→approved、竄改快照/點數欄位）
  *     一律 PERMISSION_DENIED；合法流轉（revive、syncPeriod、正常審核）不受影響（第 16 節）。
+ *   - FIX-A（347d0e1）：扣款守衛收窄——家長核准搶在扣款 trigger（prod 冷啟動 2–10 秒）
+ *     之前把 pending 改成 approved，trigger 仍要照扣、寫快照、寫 ledger，不放水（第 17 節）。
  *
  * 跑法（從專案根目錄；會先 build functions）：
  *   npm --prefix functions run build && \
@@ -696,6 +698,43 @@ async function main() {
     await updateDoc(doc(P.db, 'rewardOrders', order4Id), {
       status: 'approved', approvedAt: serverTimestamp(),
     });
+  });
+
+  // ========== 17. FIX-A（347d0e1）：核准搶在扣款 trigger 前落地，仍照扣不放水 ==========
+  // R2-03 的舊守衛「非 pending 一律跳過」在家長核准搶在扣款 trigger（prod 冷啟動 2-10 秒）
+  // 之前把 pending 改成 approved 時，會讓 trigger 永久跳過扣款——形成免費領獎窗口。
+  // FIX-A 收窄為只在 cancelled/rejected/doc 不存在時跳過，approved 必須照扣（重放保護
+  // 由扣款 ledger 的冪等 doc 承擔，不會重複扣）。
+  // 進場餘額：80（16.15 結束時）。
+  let order5Id;
+  await step('17.1 小孩下單（50 點）＋家長不等 trigger、立刻核准（pending → approved）', async () => {
+    const ref = await addDoc(collection(C.db, 'rewardOrders'), {
+      familyId, itemId, userId: kidUid, childId,
+      pointCostSnapshot: 50, status: 'pending',
+      cancelledAt: null, approvedAt: null, deliveredAt: null,
+      completedAt: null, autoCompleteAt: null, createdAt: serverTimestamp(),
+    });
+    order5Id = ref.id;
+    // 不 sleep、不等扣款 trigger——建單後立刻以家長身分核准，
+    // 模擬「核准搶在扣款 trigger 之前落地」的免費領獎窗口（FIX-A 修復前的攻擊場景）。
+    await updateDoc(doc(P.db, 'rewardOrders', order5Id), {
+      status: 'approved', approvedAt: serverTimestamp(),
+    });
+  });
+  await waitFor('17.2 trigger 仍照扣：錢包 80 → 30，快照寫入，訂單維持 approved（FIX-A）', async () => {
+    const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
+    const o = await adb.collection('rewardOrders').doc(order5Id).get();
+    return w.exists && o.exists
+      && w.data().balance === 30
+      && o.data().status === 'approved'
+      && o.data().balanceBeforeSnapshot === 80
+      && o.data().balanceAfterSnapshot === 30;
+  });
+  await step('17.3 pointTransactions 有對應扣款 ledger（冪等 doc reward_order_{orderId}）', async () => {
+    const pt = await adb.collection('pointTransactions').doc(`reward_order_${order5Id}`).get();
+    if (!pt.exists) throw new Error('查無扣款 ledger（FIX-A 前的守衛會在此跳過扣款，無帳可查）');
+    if (pt.data().delta !== -50) throw new Error(`delta=${pt.data().delta} != -50`);
+    if (pt.data().sourceType !== 'reward_order') throw new Error(`sourceType=${pt.data().sourceType}`);
   });
 
   // ---- 報告 ----
