@@ -126,6 +126,14 @@ client 被 rules 禁止 list 邀請（`firestore.rules:98`）→ 作廢查詢只
 > 家長把孩子從任務移除的正常路徑），只留 pending 會讓已提交/被退回的孩子無法解除指派。
 > 收窄的目的只是擋「計畫算完到寫入之間被核准」的競態，不是改變解除指派語意。
 
+> 2026-07-11 審查釐清（防線定位）：本節與 421c490 commit 訊息把裸 update 描述成
+> 「會把 approved 打穿、毀掉點數帳本歷史」——在現行 rules 下不成立：R2-CX1 的
+> taskInstances 轉移矩陣早已把 approved 鎖成 client 終態（對 approved 寫 missed
+> 匹配不到任何條款 → permission-denied），後端防線完好。本項的實際價值是 UX/健壯性：
+> 單筆競態不再讓 rules 拒絕冒成整批移除中斷＋神祕「儲存失敗」。另收窄 client catch：
+> 只吞 INSTANCE_GONE / INSTANCE_NOT_SUBMITTED 兩個守衛碼，其餘錯誤（網路
+> unavailable 等）重拋交外層 Alert——離線時解除指派不再靜默假成功。
+
 驗收：app jest 正反例（pending/submitted/rejected→missed 過；approved/missed 不動）。
 
 ## 7. 流程與閘門
