@@ -167,10 +167,33 @@ export default function ChildTaskDetail() {
     code === 'MAX_SUBMISSIONS' ||
     code === 'INSTANCE_NOT_SUBMITTABLE';
 
+  // R3-4 審查修正：正式 rules 下 doc 被硬刪時，交易的 tx.get() 會被規則擋成
+  // permission-denied（resource 為 null → isFamilyMember 求值失敗），不會回
+  // exists()==false——守衛的 INSTANCE_GONE 分支在線上到不了。這裡把
+  // permission-denied 也對應到「狀態剛剛變了」的守衛文案＋返回清單，
+  // 不再誤導成網路問題讓小孩重試一個永遠不會成功的提交。
+  const isPermissionDenied = (e: unknown): boolean =>
+    String((e as any)?.code ?? '').includes('permission-denied');
+
   const handleSubmit = async () => {
     if (!instance || !task || !uid || !photoUri) return;
     try {
       setSubmitting(true);
+      // R3-4 審查修正：上傳照片前的廉價預檢（防孤兒照片＋省流量）——
+      // 已達上限（本地快照即知，零成本）或任務剛被封存（一次 doc 讀取）就先擋，
+      // 照片不會白傳進 Storage。只是 UX 前哨：權威判斷仍在下方交易守衛內重讀。
+      if ((instance.submissionCount || 0) >= MAX_SUBMISSIONS) {
+        alertGuardBlocked('MAX_SUBMISSIONS');
+        return;
+      }
+      const taskSnap = await firestore()
+        .collection('tasks')
+        .doc(instance.taskId)
+        .get();
+      if (!taskSnap.exists() || taskSnap.data()?.status === 'archived') {
+        alertGuardBlocked('TASK_ARCHIVED');
+        return;
+      }
       const photoUrl = await uploadPhoto(instance.familyId, photoUri);
       // R3-4b：batch 直寫改交易守衛——交易內重讀 instance 狀態＋task 未封存＋
       // submissionCount 判上限（取代本地 state 防呆）；submission 建檔同交易，原子性不變。
@@ -217,6 +240,8 @@ export default function ChildTaskDetail() {
       const code = (e as any)?.message;
       if (isGuardCode(code)) {
         alertGuardBlocked(code);
+      } else if (isPermissionDenied(e)) {
+        alertGuardBlocked('INSTANCE_NOT_SUBMITTABLE');
       } else {
         Alert.alert('上傳失敗', '檢查一下網路，再試一次。');
       }
@@ -261,6 +286,8 @@ export default function ChildTaskDetail() {
       const code = e?.message;
       if (isGuardCode(code)) {
         alertGuardBlocked(code);
+      } else if (isPermissionDenied(e)) {
+        alertGuardBlocked('INSTANCE_NOT_SUBMITTABLE');
       } else {
         Alert.alert('假提交失敗', e?.message || '再試一次');
       }

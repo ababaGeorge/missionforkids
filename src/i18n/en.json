@@ -75,6 +75,7 @@
     "submitNotSubmittable": "This mission just changed. Check your mission list for the latest.",
     "submitMaxReached": "No more tries for this mission today. Come back tomorrow!",
     "backToTasks": "Back to missions",
+    "loadingTasks": "Loading missions…",
     "attempts": "attempts",
     "templates": "Templates",
     "useTemplate": "Use Template",

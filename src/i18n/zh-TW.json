@@ -75,6 +75,7 @@
     "submitNotSubmittable": "這個任務的狀態剛剛變了，回任務清單看看最新狀態。",
     "submitMaxReached": "這個任務今天不能再提交了，明天再來吧。",
     "backToTasks": "回任務清單",
+    "loadingTasks": "任務載入中…",
     "attempts": "次提交",
     "templates": "範本",
     "useTemplate": "使用範本",

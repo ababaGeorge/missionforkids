@@ -5,9 +5,11 @@ import {
   Text,
   StyleSheet,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import type { TaskInstance, Task, PointWallet } from '../../../types/models';
@@ -62,10 +64,14 @@ const dayPhrase = (): string => {
 export default function ChildTasks() {
   const uid = auth().currentUser?.uid;
   const { user } = useAuth();
+  const { t } = useTranslation();
   const router = useRouter();
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [instances, setInstances] = useState<TaskWithInstance['instance'][]>([]);
-  // taskId → task 的即時 map；null = tasks 快照還沒到（避免閃「沒有任務」空狀態）
+  // taskId → task 的即時 map；null = tasks 快照還沒到。
+  // R3-4 審查修正：null 哨兵原本只宣告不使用（render 只看 items.length，
+  // 空狀態照樣閃）——現在 render 端以 tasksLoading 分流，快照到之前顯示
+  // 載入中，不再閃「今天沒有任務」。
   const [taskMap, setTaskMap] = useState<Record<
     string,
     Task & { emoji?: string }
@@ -209,6 +215,9 @@ export default function ChildTasks() {
 
   const kidName = user?.displayName || '你';
   const balance = wallet?.balance || 0;
+  // 已知 familyId 但 tasks 快照還沒到 → 顯示載入中，避免閃「今天沒有任務」。
+  // （familyId 還沒解析的冷啟極短窗口維持既有行為，不擋無家庭成員的邊緣情境。）
+  const tasksLoading = familyId !== null && taskMap === null;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -241,7 +250,9 @@ export default function ChildTasks() {
         <View style={styles.progressCard}>
           <View style={styles.progressHeader}>
             <Label color={P.text} style={{ fontSize: 13 }}>
-              {grouped.pending > 0
+              {tasksLoading
+                ? t('tasks.loadingTasks')
+                : grouped.pending > 0
                 ? `${grouped.pending} 個等你，收集星光`
                 : grouped.total > 0
                 ? '今天的任務都完成了'
@@ -257,7 +268,11 @@ export default function ChildTasks() {
         </View>
 
         {/* Sections */}
-        {items.length === 0 ? (
+        {tasksLoading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={P.primary} />
+          </View>
+        ) : items.length === 0 ? (
           <Empty emoji="✦" title="今天沒有任務" body="休息一下，明天再來！" />
         ) : (
           <View style={styles.sections}>
@@ -479,6 +494,10 @@ const secStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: P.bg },
   scroll: { flex: 1 },
+  loadingWrap: {
+    paddingTop: spacing['2xl'],
+    alignItems: 'center',
+  },
   scrollContent: { paddingBottom: spacing['3xl'] + spacing.lg },
   header: {
     paddingHorizontal: spacing.lg,

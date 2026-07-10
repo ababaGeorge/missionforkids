@@ -57,6 +57,13 @@ export async function updateInstanceIfStatusIn(
 //   2. tasks/{taskId} 存在且 status !== 'archived'（不存在＝被移除，同樣擋）
 //   3. submissionCount 未達上限（取代本地 state 防呆）
 // 違反拋錯誤碼，UI 用 i18n 顯示文案後返回清單。
+//
+// 注意（R3-4 審查修正）：正式 firestore.rules 對「不存在的 doc」求值
+// resource.data 會 error → client 的 tx.get() 直接收到 permission-denied，
+// 拿不到 exists()==false 的快照。所以 INSTANCE_GONE 與「task 不存在 →
+// TASK_ARCHIVED」兩個 exists 分支在線上硬刪場景到不了 client，屬防禦縱深
+// （emulator / 單元測試 / 未來規則放寬時的保底）。線上硬刪由 UI 端把
+// permission-denied 對應到同款「狀態已變」守衛文案（見 task/[id].tsx）。
 // =============================================================================
 
 /** 提交允許的來源狀態（與 firestore.rules 小孩提交轉移矩陣一致） */
