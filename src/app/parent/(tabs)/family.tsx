@@ -549,7 +549,6 @@ export default function FamilyScreen() {
       <ManageMemberModal
         member={manageMember}
         currentUid={uid}
-        familyCreatedBy={family.createdBy}
         onClose={() => setManageMember(null)}
       />
     </SafeAreaView>
@@ -559,12 +558,10 @@ export default function FamilyScreen() {
 function ManageMemberModal({
   member,
   currentUid,
-  familyCreatedBy,
   onClose,
 }: {
   member: MemberRow | null;
   currentUid: string | undefined;
-  familyCreatedBy: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -582,9 +579,10 @@ function ManageMemberModal({
 
   const isSelf = member.membership.userId === currentUid;
   const isChild = member.membership.role === 'child';
-  const isCreator = currentUid === familyCreatedBy;
-  // 小孩：任何家長可移除。家長：只有 family 建立者可移除，且不能移除自己。
-  const canRemove = !isSelf && (isChild || isCreator);
+  // R3-3 審查修正：CF 只允許移除小孩（ONLY_CHILD_REMOVABLE），對齊政策把
+  // 「移除家長」按鈕一併下架（原本 creator 看其他家長會顯示必失敗的死路按鈕）。
+  // 家長互移待 co-parent 政策設計後與 CF 一起放寬。
+  const canRemove = !isSelf && isChild;
 
   const handleSave = async () => {
     try {
@@ -615,11 +613,19 @@ function ManageMemberModal({
               // R3-3：移除走 CF（原子完成 membership 標 removed＋作廢 pending 邀請）。
               // rules 已禁止 client 直改 status:'removed'。
               const fn = functions().httpsCallable('removeFamilyMember');
-              await fn({
+              const res: any = await fn({
                 familyId: member.membership.familyId,
                 memberUserId: member.membership.userId,
               });
               onClose();
+              // legacy 成員找不到 email → CF 跳過作廢邀請並回傳 warning，
+              // 必須讓家長知道 pending 邀請仍有效（否則靜默留下可重新入家的邀請）。
+              if (res?.data?.warning === 'NO_EMAIL_SKIP_REVOKE') {
+                Alert.alert(
+                  t('family.removeDoneTitle'),
+                  t('family.removeInviteNotRevoked')
+                );
+              }
             } catch (e: any) {
               let msg = e?.message || '不明錯誤';
               if (/NOT_PARENT/.test(msg)) msg = t('family.removeNotParent');

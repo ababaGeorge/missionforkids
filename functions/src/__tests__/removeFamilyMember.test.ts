@@ -196,14 +196,29 @@ describe('removeFamilyMember', () => {
     expect(inv.data()!.status).toBe('pending');
   });
 
-  it('user doc 不存在（legacy doc id ≠ uid）→ 同無 email 分支，移除成功＋warning', async () => {
+  it('user doc 不存在且 authProviderId 也查不到（真 legacy 無 email）→ 移除成功＋warning', async () => {
     const familyId = 'fam-r10';
     await seedMembership('parent-1', familyId, { role: 'parent' });
     await seedMembership('kid-1', familyId);
-    // 不 seed users/kid-1
+    // 不 seed users/kid-1，authProviderId fallback 也查無
 
     const res: any = await call({ familyId, memberUserId: 'kid-1' }, 'parent-1');
     expect(res).toEqual({ removed: true, revokedInvites: 0, warning: 'NO_EMAIL_SKIP_REVOKE' });
+  });
+
+  it('legacy user doc（doc id ≠ uid）有 email → authProviderId fallback 找到、邀請照樣作廢無 warning', async () => {
+    const familyId = 'fam-r12';
+    await seedMembership('parent-1', familyId, { role: 'parent' });
+    await seedMembership('kid-legacy', familyId);
+    // user doc id 與 membership userId 不同，靠 authProviderId 匹配（useAuth fallback 同款）
+    await seedUser('legacy-doc-1', { authProviderId: 'kid-legacy', email: 'Kid@Example.com' });
+    await seedInvite('inv-r12', familyId);
+
+    const res: any = await call({ familyId, memberUserId: 'kid-legacy' }, 'parent-1');
+    expect(res).toEqual({ removed: true, revokedInvites: 1 });
+
+    const inv = await db().collection('familyInvites').doc('inv-r12').get();
+    expect(inv.data()).toMatchObject({ status: 'revoked', revokedBy: 'parent-1' });
   });
 
   it('沒有匹配的 pending 邀請 → revokedInvites 0、無 warning', async () => {

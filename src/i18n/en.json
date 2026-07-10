@@ -42,6 +42,8 @@
     "removeMemberNotFound": "Member not found — they may have already been removed",
     "removeCannotRemoveSelf": "You can't remove yourself from the family",
     "removeOnlyChildRemovable": "Only child members can be removed for now",
+    "removeDoneTitle": "Member removed",
+    "removeInviteNotRevoked": "This member's profile has no email, so invites sent to them couldn't be revoked automatically. Unused invite links may still be used to rejoin the family.",
     "createFailed": "Failed to create family"
   },
   "tasks": {

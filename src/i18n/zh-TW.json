@@ -42,6 +42,8 @@
     "removeMemberNotFound": "找不到這位成員，可能已經被移除了",
     "removeCannotRemoveSelf": "不能把自己移出家庭",
     "removeOnlyChildRemovable": "目前只能移除小孩成員",
+    "removeDoneTitle": "已移除成員",
+    "removeInviteNotRevoked": "這位成員的資料缺少 email，先前寄給他的邀請無法自動作廢。尚未使用的邀請連結仍可能被用來重新加入家庭。",
     "createFailed": "建立家庭失敗"
   },
   "tasks": {

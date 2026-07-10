@@ -56,10 +56,26 @@ export const removeFamilyMember = onCall(async (request) => {
     }
 
     // 作廢邀請：以 user doc 的 email 匹配（invite.email 建立時已 lowercase）。
-    // legacy user doc 無 email → 查不到匹配邀請，跳過作廢並回傳 warning。
     const userSnap = await tx.get(db.collection('users').doc(memberUserId));
-    const email =
+    let email =
       ((userSnap.data()?.email as string | undefined) ?? '').trim().toLowerCase() || null;
+
+    // legacy 帳號（user doc id ≠ uid）：users/{memberUserId} 讀不到 →
+    // 比照 acceptFamilyInvite 用 authProviderId 再查一次，避免「其實有 email
+    // 卻走 NO_EMAIL_SKIP_REVOKE、pending 邀請沒被作廢」的一致性缺口。
+    // 此 read 仍在所有 write 之前（Firestore transaction 規則）。
+    if (!email) {
+      const legacySnap = await tx.get(
+        db.collection('users').where('authProviderId', '==', memberUserId).limit(1)
+      );
+      if (!legacySnap.empty) {
+        email =
+          (((legacySnap.docs[0].data()?.email as string | undefined) ?? '')
+            .trim()
+            .toLowerCase()) || null;
+      }
+    }
+    // 到這裡仍無 email（真 legacy）→ 查不到匹配邀請，跳過作廢並回傳 warning。
 
     let inviteDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
     if (email) {

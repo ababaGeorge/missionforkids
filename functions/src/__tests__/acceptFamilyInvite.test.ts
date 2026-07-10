@@ -204,9 +204,13 @@ describe('acceptFamilyInvite', () => {
     } as any);
 
     const db = admin.firestore();
-    // 小孩已賺到 20 點，之後被家長移除（family.tsx 的移除只改 status）
+    // 小孩已賺到 20 點，之後被家長移除（鏡像 removeFamilyMember 的寫入：status＋審計欄）
     await db.collection('pointWallets').doc(`${familyId}_${uid}`).update({ balance: 20 });
-    await db.collection('familyMemberships').doc(`${uid}_${familyId}`).update({ status: 'removed' });
+    await db.collection('familyMemberships').doc(`${uid}_${familyId}`).update({
+      status: 'removed',
+      removedAt: FieldValue.serverTimestamp(),
+      removedBy: 'parent-uid-9',
+    });
 
     // 家長對同一 email 再開一張邀請
     await seedInvite('inv-9b', familyId);
@@ -218,6 +222,9 @@ describe('acceptFamilyInvite', () => {
 
     const memDoc = await db.collection('familyMemberships').doc(`${uid}_${familyId}`).get();
     expect(memDoc.data()).toMatchObject({ status: 'active', childId: uid, userId: uid });
+    // reactivate 必須清掉移除審計欄（否則 active doc 帶著 removedAt，審計語意矛盾）
+    expect(memDoc.data()!.removedAt).toBeUndefined();
+    expect(memDoc.data()!.removedBy).toBeUndefined();
 
     const walletDoc = await db.collection('pointWallets').doc(`${familyId}_${uid}`).get();
     expect(walletDoc.data()!.balance).toBe(20); // 點數保留
