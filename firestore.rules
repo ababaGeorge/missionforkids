@@ -171,11 +171,16 @@ service cloud.firestore {
         ||
         (
           // ---- 非家長成員（小孩）----
-          // 提交：pending / rejected → submitted（batch 同步寫計數與時間）
+          // 提交：pending / rejected → submitted（交易同步寫計數與時間）
+          // R3-4c：task 已封存（soft delete）→ 拒絕提交。client 交易守衛
+          // （submitInstanceGuarded）只存在於新版 App，這裡把後端也關上，
+          // 舊版 client / 直打 API 一樣擋住。task doc 不存在時 get() 取 data
+          // 會 error → 條件為 false → 同樣拒絕，語意正確。
           (
             resource.data.status in ['pending', 'rejected']
             && request.resource.data.status == 'submitted'
             && changedKeys().hasOnly(['status', 'submissionCount', 'submittedAt'])
+            && get(/databases/$(database)/documents/tasks/$(resource.data.taskId)).data.status != 'archived'
           )
           ||
           // 重試/重拍：rejected → pending

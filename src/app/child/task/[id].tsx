@@ -14,10 +14,12 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import type { Task, TaskInstance } from '../../../types/models';
+import { submitInstanceGuarded } from '../../../lib/instances';
 import { resolveMyChildId, walletDocId } from '../../../lib/childId';
 import { pickPhoto, uploadPhoto } from '../../../lib/photoUpload';
 import { P, spacing, radius } from '../../../design/tokens';
@@ -56,6 +58,7 @@ const fmtWhen = (ts: any): string => {
 export default function ChildTaskDetail() {
   const { id: instanceId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { t } = useTranslation();
   const uid = auth().currentUser?.uid;
 
   const [instance, setInstance] = useState<InstanceDoc | null>(null);
@@ -142,34 +145,59 @@ export default function ChildTaskDetail() {
     setShowCameraPrep(true);
   };
 
+  // R3-4b：守衛擋下時（任務被封存/紀錄異動/已達上限）用 i18n 文案提示，按下後返回清單。
+  // 交易失敗代表清單畫面的資料已過時，留在本頁沒有意義。
+  const alertGuardBlocked = (code: string) => {
+    const bodyKey =
+      code === 'TASK_ARCHIVED'
+        ? 'tasks.submitTaskArchived'
+        : code === 'INSTANCE_GONE'
+        ? 'tasks.submitInstanceGone'
+        : code === 'MAX_SUBMISSIONS'
+        ? 'tasks.submitMaxReached'
+        : 'tasks.submitNotSubmittable';
+    Alert.alert(t('tasks.submitBlockedTitle'), t(bodyKey), [
+      { text: t('tasks.backToTasks'), onPress: onClose },
+    ]);
+  };
+
+  const isGuardCode = (code: unknown): code is string =>
+    code === 'TASK_ARCHIVED' ||
+    code === 'INSTANCE_GONE' ||
+    code === 'MAX_SUBMISSIONS' ||
+    code === 'INSTANCE_NOT_SUBMITTABLE';
+
   const handleSubmit = async () => {
     if (!instance || !task || !uid || !photoUri) return;
-    if ((instance.submissionCount || 0) >= MAX_SUBMISSIONS) {
-      Alert.alert('已達提交上限', '這個任務今天不能再提交了。');
-      return;
-    }
     try {
       setSubmitting(true);
       const photoUrl = await uploadPhoto(instance.familyId, photoUri);
-      // submission + instance 狀態用同一個 batch 原子寫入，計數用 server-side increment
+      // R3-4b：batch 直寫改交易守衛——交易內重讀 instance 狀態＋task 未封存＋
+      // submissionCount 判上限（取代本地 state 防呆）；submission 建檔同交易，原子性不變。
       const subRef = firestore().collection('taskSubmissions').doc();
-      const batch = firestore().batch();
-      batch.set(subRef, {
-        taskInstanceId: instance.id,
-        familyId: instance.familyId,
-        submittedBy: uid,
-        photoUrls: [photoUrl],
-        childNote: note.trim() || null,
-        aiResult: null,
-        aiConfidence: null,
-        submittedAt: firestore.FieldValue.serverTimestamp(),
+      await submitInstanceGuarded({
+        instanceId: instance.id,
+        taskId: instance.taskId,
+        maxSubmissions: MAX_SUBMISSIONS,
+        instanceFields: {
+          status: 'submitted',
+          submissionCount: firestore.FieldValue.increment(1),
+          submittedAt: firestore.FieldValue.serverTimestamp(),
+        },
+        submission: {
+          ref: subRef,
+          fields: {
+            taskInstanceId: instance.id,
+            familyId: instance.familyId,
+            submittedBy: uid,
+            photoUrls: [photoUrl],
+            childNote: note.trim() || null,
+            aiResult: null,
+            aiConfidence: null,
+            submittedAt: firestore.FieldValue.serverTimestamp(),
+          },
+        },
       });
-      batch.update(firestore().collection('taskInstances').doc(instance.id), {
-        status: 'submitted',
-        submissionCount: firestore.FieldValue.increment(1),
-        submittedAt: firestore.FieldValue.serverTimestamp(),
-      });
-      await batch.commit();
       setPhotoUri(null);
       setNote('');
       // B1：AI 小幫手看照片給鼓勵（非阻斷；CF 會把判斷寫回 submission 供家長參考）。
@@ -186,7 +214,12 @@ export default function ChildTaskDetail() {
         // AI 失敗不影響提交，靜默略過
       }
     } catch (e) {
-      Alert.alert('上傳失敗', '檢查一下網路，再試一次。');
+      const code = (e as any)?.message;
+      if (isGuardCode(code)) {
+        alertGuardBlocked(code);
+      } else {
+        Alert.alert('上傳失敗', '檢查一下網路，再試一次。');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -196,33 +229,41 @@ export default function ChildTaskDetail() {
   // 讓點數 happy path 可以在 simulator 跑完。dev-gated，可整段移除。
   const handleDevSubmitNoPhoto = async () => {
     if (!instance || !task || !uid) return;
-    if ((instance.submissionCount || 0) >= MAX_SUBMISSIONS) {
-      Alert.alert('已達提交上限', '這個任務今天不能再提交了。');
-      return;
-    }
     try {
       setSubmitting(true);
-      const batch = firestore().batch();
-      batch.set(firestore().collection('taskSubmissions').doc(), {
-        taskInstanceId: instance.id,
-        familyId: instance.familyId,
-        submittedBy: uid,
-        photoUrls: [],
-        childNote: (note.trim() || '[dev] 無照片提交'),
-        aiResult: null,
-        aiConfidence: null,
-        submittedAt: firestore.FieldValue.serverTimestamp(),
+      // R3-4b：與正式提交走同一個交易守衛，避免 dev 路徑漏掉封存/上限檢查
+      await submitInstanceGuarded({
+        instanceId: instance.id,
+        taskId: instance.taskId,
+        maxSubmissions: MAX_SUBMISSIONS,
+        instanceFields: {
+          status: 'submitted',
+          submissionCount: firestore.FieldValue.increment(1),
+          submittedAt: firestore.FieldValue.serverTimestamp(),
+        },
+        submission: {
+          ref: firestore().collection('taskSubmissions').doc(),
+          fields: {
+            taskInstanceId: instance.id,
+            familyId: instance.familyId,
+            submittedBy: uid,
+            photoUrls: [],
+            childNote: (note.trim() || '[dev] 無照片提交'),
+            aiResult: null,
+            aiConfidence: null,
+            submittedAt: firestore.FieldValue.serverTimestamp(),
+          },
+        },
       });
-      batch.update(firestore().collection('taskInstances').doc(instance.id), {
-        status: 'submitted',
-        submissionCount: firestore.FieldValue.increment(1),
-        submittedAt: firestore.FieldValue.serverTimestamp(),
-      });
-      await batch.commit();
       setPhotoUri(null);
       setNote('');
     } catch (e: any) {
-      Alert.alert('假提交失敗', e?.message || '再試一次');
+      const code = e?.message;
+      if (isGuardCode(code)) {
+        alertGuardBlocked(code);
+      } else {
+        Alert.alert('假提交失敗', e?.message || '再試一次');
+      }
     } finally {
       setSubmitting(false);
     }

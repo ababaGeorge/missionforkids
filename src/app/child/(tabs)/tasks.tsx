@@ -64,11 +64,15 @@ export default function ChildTasks() {
   const { user } = useAuth();
   const router = useRouter();
   const [familyId, setFamilyId] = useState<string | null>(null);
-  const [items, setItems] = useState<TaskWithInstance[]>([]);
+  const [instances, setInstances] = useState<TaskWithInstance['instance'][]>([]);
+  // taskId → task 的即時 map；null = tasks 快照還沒到（避免閃「沒有任務」空狀態）
+  const [taskMap, setTaskMap] = useState<Record<
+    string,
+    Task & { emoji?: string }
+  > | null>(null);
   const [wallet, setWallet] = useState<PointWallet | null>(null);
   const [celebration, setCelebration] = useState<{ points: number } | null>(null);
   const prevStatuses = useRef<Record<string, TaskInstance['status']>>({});
-  const snapshotGen = useRef(0);
 
   useEffect(() => {
     if (!uid) return;
@@ -100,6 +104,28 @@ export default function ChildTasks() {
     return unsub;
   }, [uid, familyId, childId]);
 
+  // R3-4a：任務清單改訂閱 tasks where familyId==（取代逐 instance 一次性 get）。
+  // 家長封存任務（soft delete）不會觸發 taskInstances 監聽——舊做法要等下次
+  // instance 變動才重新過濾，封存後小孩清單不即時消失。改成 tasks 快照建 map，
+  // 一封存馬上重組清單；也順帶消掉逐筆 await（家庭任務量小，成本可接受）。
+  useEffect(() => {
+    if (!familyId) return;
+    const unsub = firestore()
+      .collection('tasks')
+      .where('familyId', '==', familyId)
+      .onSnapshot((snap) => {
+        if (!snap) return;
+        const map: Record<string, Task & { emoji?: string }> = {};
+        for (const doc of snap.docs) {
+          map[doc.id] = { id: doc.id, ...doc.data() } as Task & { emoji?: string };
+        }
+        setTaskMap(map);
+      }, (err) => {
+        console.error('[ChildTasks] tasks snapshot error:', (err as any)?.code);
+      });
+    return unsub;
+  }, [familyId]);
+
   useEffect(() => {
     if (!uid || !familyId) return;
     const unsub = firestore()
@@ -107,47 +133,42 @@ export default function ChildTasks() {
       .where('childId', '==', childId)
       .where('familyId', '==', familyId)
       .where('status', 'in', ['pending', 'submitted', 'approved', 'rejected'])
-      .onSnapshot(async (snap) => {
+      .onSnapshot((snap) => {
         if (!snap) return;
-        const gen = ++snapshotGen.current;
-        const next: TaskWithInstance[] = [];
+        const next: TaskWithInstance['instance'][] = [];
         for (const doc of snap.docs) {
-          try {
-            const instance = { id: doc.id, ...doc.data() } as TaskInstance & {
-              parentNote?: string | null;
-              submittedAt?: any;
-            };
-            const taskDoc = await firestore()
-              .collection('tasks')
-              .doc(instance.taskId)
-              .get();
-            const taskData = taskDoc.data();
-            // 家長刪任務是 soft delete（status='archived'）：archived 的任務不進清單，
-            // 避免刪了還看得到、還能提交。
-            if (taskData && taskData.status !== 'archived') {
-              next.push({
-                task: { id: taskDoc.id, ...taskData } as Task & { emoji?: string },
-                instance,
-              });
-            }
-            // 慶祝動畫：等 pointsAwarded（CF 非同步補寫）到位才觸發，避免閃「+0」。
-            const step = celebrationStep(
-              prevStatuses.current[doc.id],
-              instance.status,
-              instance.pointsAwarded
-            );
-            if (step.celebrate) setCelebration({ points: step.points });
-            if (step.advance) prevStatuses.current[doc.id] = instance.status;
-          } catch (e) {
-            console.warn('[ChildTasks] skipping instance', doc.id, (e as any)?.code);
-          }
+          const instance = { id: doc.id, ...doc.data() } as TaskInstance & {
+            parentNote?: string | null;
+            submittedAt?: any;
+          };
+          next.push(instance);
+          // 慶祝動畫：等 pointsAwarded（CF 非同步補寫）到位才觸發，避免閃「+0」。
+          const step = celebrationStep(
+            prevStatuses.current[doc.id],
+            instance.status,
+            instance.pointsAwarded
+          );
+          if (step.celebrate) setCelebration({ points: step.points });
+          if (step.advance) prevStatuses.current[doc.id] = instance.status;
         }
-        if (gen === snapshotGen.current) setItems(next);
+        setInstances(next);
       }, (err) => {
         console.error('[ChildTasks] snapshot error:', (err as any)?.code, err?.message);
       });
     return unsub;
   }, [uid, familyId, childId]);
+
+  // 組裝：instance × taskMap。家長刪任務是 soft delete（status='archived'）：
+  // archived（或 task doc 已不存在）的不進清單，避免刪了還看得到、還能提交。
+  const items = useMemo<TaskWithInstance[]>(() => {
+    if (!taskMap) return [];
+    const next: TaskWithInstance[] = [];
+    for (const instance of instances) {
+      const task = taskMap[instance.taskId];
+      if (task && task.status !== 'archived') next.push({ task, instance });
+    }
+    return next;
+  }, [instances, taskMap]);
 
   const grouped = useMemo(() => {
     const daily: TaskWithInstance[] = [];
