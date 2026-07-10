@@ -20,7 +20,9 @@ import { memberName } from '../../../lib/memberName';
 import {
   assignedUserIds,
   planAssignmentChanges,
+  IN_PROGRESS_STATUSES,
 } from '../../../lib/taskAssignments';
+import { updateInstanceIfStatusIn } from '../../../lib/instances';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -760,11 +762,21 @@ function CreateTaskModal({
         }
         // 被移除的孩子 → 只把「進行中」的 instance 標 missed（保留歷史，不刪）；
         // approved 是點數帳本對應的歷史，覆寫會毀掉紀錄。
+        // R3-6：改走交易守衛 updateInstanceIfStatusIn——plan 算完到寫入之間
+        // instance 可能已被另一位家長核准（或已 missed），裸 update 會蓋掉終態。
+        // 來源狀態限 IN_PROGRESS_STATUSES；轉移失敗＝已是終態，靜默跳過該筆
+        // 不中斷其他筆（解除指派的語意不變，只是不再打穿終態）。
         for (const inst of plan.markMissed) {
-          await firestore()
-            .collection('taskInstances')
-            .doc(inst.id)
-            .update({ status: 'missed' });
+          try {
+            await updateInstanceIfStatusIn(inst.id, IN_PROGRESS_STATUSES, {
+              status: 'missed',
+            });
+          } catch (err) {
+            console.warn(
+              `markMissed 跳過 instance ${inst.id}（已非進行中狀態）`,
+              err
+            );
+          }
         }
         onClose();
         return;

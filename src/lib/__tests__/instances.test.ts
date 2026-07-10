@@ -3,6 +3,7 @@ import {
   submitInstanceGuarded,
   INSTANCE_STALE_MESSAGES,
 } from '../instances';
+import { IN_PROGRESS_STATUSES } from '../taskAssignments';
 
 const mockTxGet = jest.fn();
 const mockTxUpdate = jest.fn();
@@ -98,6 +99,37 @@ describe('updateInstanceIfStatusIn（交易內重讀任務 instance 的狀態守
     expect(fn).not.toHaveBeenCalled();
     expect(mockTxUpdate).not.toHaveBeenCalled();
   });
+});
+
+describe('R3-6 markMissed 收窄（來源狀態限 IN_PROGRESS_STATUSES）', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it.each(['pending', 'submitted', 'rejected'] as const)(
+    '進行中狀態 %s → missed 允許寫入',
+    async (status) => {
+      mockTxGet.mockResolvedValue(instanceSnap({ status }));
+      await updateInstanceIfStatusIn('i1', IN_PROGRESS_STATUSES, {
+        status: 'missed',
+      });
+      expect(mockTxUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'i1' }),
+        { status: 'missed' }
+      );
+    }
+  );
+
+  it.each(['approved', 'missed'] as const)(
+    '終態 %s（plan 算完後被搶先寫入）→ 拋碼、不打穿',
+    async (status) => {
+      mockTxGet.mockResolvedValue(instanceSnap({ status }));
+      await expect(
+        updateInstanceIfStatusIn('i1', IN_PROGRESS_STATUSES, {
+          status: 'missed',
+        })
+      ).rejects.toThrow('INSTANCE_NOT_SUBMITTED');
+      expect(mockTxUpdate).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe('submitInstanceGuarded（R3-4b 小孩提交的交易守衛）', () => {
