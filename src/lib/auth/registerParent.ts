@@ -23,11 +23,12 @@ export async function registerParent(
     });
     return { familyId: (res.data as { familyId: string }).familyId };
   } catch (e: any) {
-    // R2-21(R2-05 審查)：ALREADY_CHILD 是永久性角色衝突（既有小孩帳號打家長註冊），
-    // 重試不會成功。此時 ensureAuthUser 的恢復路徑已把裝置登入成該帳號，不登出的話
-    // 殺 App 重開會直接以小孩角色進首頁。先登出再拋錯；其他錯誤（網路/CF 冷啟動）
-    // 保留 session 讓使用者重試走恢復路徑。登出失敗不吞原錯誤。
-    if (/ALREADY_CHILD/.test(e?.message ?? '')) {
+    // R2-21(R2-05 審查)＋R3 審查修正：ALREADY_CHILD（既有小孩帳號打家長註冊）與
+    // ALREADY_IN_FAMILY（既有帳號已有 active membership）都是永久性衝突，重試不會成功。
+    // 此時 ensureAuthUser 的恢復路徑已把裝置登入成該帳號，不登出的話殺 App 重開
+    // 會以該既有帳號（可能是錯誤角色/半身分狀態）直接進首頁。先登出再拋錯；
+    // 其他錯誤（網路/CF 冷啟動）保留 session 讓使用者重試走恢復路徑。登出失敗不吞原錯誤。
+    if (/ALREADY_CHILD|ALREADY_IN_FAMILY/.test(e?.message ?? '')) {
       try {
         await auth().signOut();
       } catch {}

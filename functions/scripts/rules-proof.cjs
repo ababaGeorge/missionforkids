@@ -59,6 +59,8 @@ async function seed() {
   await adb.collection('familyMemberships').doc(`${DAD}_F`).set({ familyId: 'F', userId: DAD, role: 'parent', status: 'active' });
   await adb.collection('familyMemberships').doc(`${KID}_F`).set({ familyId: 'F', userId: KID, role: 'child', status: 'active', childId: KID });
   await adb.collection('familyMemberships').doc(`${OUTSIDER}_G`).set({ familyId: 'G', userId: OUTSIDER, role: 'parent', status: 'active' });
+  // R3 審查修正用：F 家一個已被移除的成員（測「翻回 active」攻擊）
+  await adb.collection('familyMemberships').doc('kid2_uid_F').set({ familyId: 'F', userId: 'kid2_uid', role: 'child', status: 'removed', childId: 'kid2_uid' });
 
   await adb.collection('tasks').doc('T').set({ familyId: 'F', title: '收玩具', points: 100, status: 'active', createdBy: DAD });
   await adb.collection('taskInstances').doc('I').set({
@@ -96,6 +98,13 @@ async function main() {
   await expectDenied('A3b 在別人家庭 G 建 parent membership', () =>
     setDoc(doc(db, 'familyMemberships', 'kid_uid_G'), { familyId: 'G', userId: 'kid_uid', role: 'parent', status: 'active' }));
 
+  // R3 審查修正：client 直建 family＋自己的 parent membership（繞過 bootstrapParentAccount
+  // 的 ALREADY_IN_FAMILY 守衛、自開第二個家庭）——create 已全面收回，一律 DENIED。
+  await expectDenied('R3 直建 family（繞過 CF 一帳號一家庭守衛）', () =>
+    setDoc(doc(db, 'families', 'H'), { displayName: 'H家', createdBy: 'kid_uid', defaultGraceDays: 2 }));
+  await expectDenied('R3 直建自己的 parent membership', () =>
+    setDoc(doc(db, 'familyMemberships', 'kid_uid_H'), { familyId: 'H', userId: 'kid_uid', role: 'parent', status: 'active' }));
+
   await expectDenied('A4 讀別人家庭 G 的兒童照片提交', () =>
     getDocs(query(collection(db, 'taskSubmissions'), where('familyId', '==', 'G'))));
 
@@ -128,6 +137,10 @@ async function main() {
   await signInWithCustomToken(auth, dadToken);
   await expectDenied('R3-3 家長 client 直改 membership status → removed', () =>
     updateDoc(doc(db, 'familyMemberships', 'kid_uid_F'), { status: 'removed' }));
+  // R3 審查修正：status 完全不可由 client 改——把 removed 翻回 active（重造雙 active
+  // membership）也要擋。reactivate 只走 acceptFamilyInvite CF（admin）。
+  await expectDenied('R3 家長把 removed membership 翻回 active', () =>
+    updateDoc(doc(db, 'familyMemberships', 'kid2_uid_F'), { status: 'active' }));
   await expectAllowed('正常：家長改成員暱稱/頭像（不動 status）', () =>
     updateDoc(doc(db, 'familyMemberships', 'kid_uid_F'), { nickname: '小明明', avatarEmoji: '🦊' }));
 

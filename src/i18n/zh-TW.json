@@ -41,7 +41,8 @@
     "removeNotParent": "只有這個家庭的家長可以移除成員",
     "removeMemberNotFound": "找不到這位成員，可能已經被移除了",
     "removeCannotRemoveSelf": "不能把自己移出家庭",
-    "removeOnlyChildRemovable": "目前只能移除小孩成員"
+    "removeOnlyChildRemovable": "目前只能移除小孩成員",
+    "createFailed": "建立家庭失敗"
   },
   "tasks": {
     "title": "任務",

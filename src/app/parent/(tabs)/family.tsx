@@ -49,6 +49,7 @@ const AVATAR_EMOJIS = [
 
 export default function FamilyScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const uid = auth().currentUser?.uid;
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -113,25 +114,20 @@ export default function FamilyScreen() {
 
   const handleCreateFamily = async () => {
     if (!uid || !familyName.trim()) return;
-    const ref = await firestore().collection('families').add({
-      displayName: familyName.trim(),
-      defaultGraceDays: 2,
-      createdBy: uid,
-      createdAt: firestore.FieldValue.serverTimestamp(),
-    });
-    await firestore()
-      .collection('familyMemberships')
-      .doc(`${uid}_${ref.id}`)
-      .set({
-        familyId: ref.id,
-        userId: uid,
-        role: 'parent',
-        status: 'active',
-        invitedBy: uid,
-        joinedAt: firestore.FieldValue.serverTimestamp(),
-      });
-    setFamilyName('');
-    setShowCreateFamily(false);
+    try {
+      // R3 審查修正：建家庭改走 bootstrapParentAccount CF——守衛（ALREADY_IN_FAMILY
+      // 一帳號一家庭）只在 CF 交易內，client 直寫會繞過；rules 已同步收回
+      // families/familyMemberships 的 client create 許可。user doc 已存在（能進到
+      // 這個畫面的前提）→ CF 不會動它，只補 family＋parent membership。
+      const fn = functions().httpsCallable('bootstrapParentAccount');
+      await fn({ familyName: familyName.trim() });
+      setFamilyName('');
+      setShowCreateFamily(false);
+    } catch (e: any) {
+      let msg = e?.message ?? t('family.createFailed');
+      if (/ALREADY_IN_FAMILY/.test(msg)) msg = t('auth.alreadyInFamily');
+      Alert.alert(t('family.createFailed'), msg);
+    }
   };
 
   const handleInviteByEmail = async () => {
