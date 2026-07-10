@@ -825,6 +825,13 @@ async function main() {
   // ========== 19. R3-4c：任務封存後，舊版 client 直寫提交被 rules 後端擋 ==========
   // 新版 client 的交易守衛（submitInstanceGuarded）只保護新 App；這裡模擬「沒有守衛的
   // 舊版 client」直打 Firestore 的提交 batch，必須被 rules 的 archived 檢查擋下。
+  //
+  // 邊界揭露（R3 審查確認、接受不擋）：rules 的 archived 檢查只掛在 taskInstances 的
+  // 提交轉移條款；taskSubmissions create 本身不查 task 是否 archived——單獨 addDoc
+  // 一筆 submission 可以成功、留下孤兒 doc（無點數/審核影響：審核流讀的是 submitted
+  // 的 taskInstance，而該轉移已被擋）。19.3 擋下整個 batch 靠的是 instance 轉移被拒
+  // ＋batch 原子性，不是 submission create 被擋。取捨理由見 firestore.rules
+  // taskSubmissions 段註解。
   let task5Id, instance5Id;
   await step('19.1 家長建第五個任務 instance（pending）', async () => {
     const now = Timestamp.now();
@@ -887,6 +894,13 @@ async function main() {
   // 鏡像 src/lib/instances.ts updateInstanceIfStatusIn（tasks.tsx markMissed 用法）：
   // 交易內重讀 status，僅 IN_PROGRESS 三態（pending/submitted/rejected）才寫 missed。
   // instanceId 自第 5 節起是 approved（pointsAwarded=100 的點數帳本歷史）。
+  //
+  // ⚠️ 手抄鏡像，非出貨 client 碼（RN module 無法在 node E2E 直跑）：
+  // 20.1/20.3 驗的是這份鏡像＋rules 的組合行為，真本體（updateInstanceIfStatusIn）
+  // 由 src/lib/__tests__/instances.test.ts（app jest，plan §6）覆蓋；後端唯一閘門是
+  // 20.2 的 rules（R2-CX1 既有矩陣，R3-6 未新增 rules）。改動 updateInstanceIfStatusIn
+  // 的允許狀態/寫入欄位、或 src/lib/taskAssignments.ts 的 IN_PROGRESS_STATUSES 時，
+  // 必須同步改下方鏡像（兩檔已加回指註解，雙向指標）。
   const IN_PROGRESS_STATUSES = ['pending', 'submitted', 'rejected'];
   async function markMissedGuarded(client, instId) {
     await runTransaction(client.db, async (tx) => {

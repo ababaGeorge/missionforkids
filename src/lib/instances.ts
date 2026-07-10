@@ -26,6 +26,10 @@ type InstanceFieldsFn = (data: Record<string, any>) => InstanceFields;
  * 否則拋錯誤碼：不存在 → INSTANCE_GONE、非前置狀態 → INSTANCE_NOT_SUBMITTED。
  * fieldsOrFn 可傳固定欄位物件，或回呼（拿到重讀資料後回傳欄位）——
  * 三振計數等依賴 instance 現值的邏輯必須用回呼版，避免用到凍結快照。
+ *
+ * ⚠️ E2E 有手抄鏡像：functions/scripts/core-loop-e2e.cjs 第 20 節 markMissedGuarded
+ * （RN module 無法在 node 直跑）——改本函式的守衛邏輯或寫入欄位時，必須同步改鏡像，
+ * 否則 E2E 綠燈不再反映真實 client 行為。
  */
 export async function updateInstanceIfStatusIn(
   instanceId: string,

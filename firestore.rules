@@ -195,6 +195,10 @@ service cloud.firestore {
 
     // ========== Task Submissions ==========
     // A4 修復：read 加家庭隔離（client 查詢已改為帶 where familyId）。
+    // 已知接受的邊界（R3-4 審查揭露）：create 不查對應 task 是否 archived——對封存任務
+    // 單獨 create 一筆 submission 會成功、留下孤兒 doc。無點數/審核影響（審核流讀的是
+    // submitted 的 taskInstance，該轉移已被上方 archived 檢查擋住）；要擋需對每筆 create
+    // 多兩次 get()（submission 只有 taskInstanceId，得 instance→task 兩跳），成本不值。
     match /taskSubmissions/{submissionId} {
       allow read: if isFamilyMember(resource.data.familyId);
       // 小孩提交：必須是該家庭成員、submittedBy 是自己

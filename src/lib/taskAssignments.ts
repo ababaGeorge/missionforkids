@@ -1,6 +1,10 @@
 import type { TaskInstance, TaskInstanceStatus } from '../types/models';
 
-/** 進行中的 instance 狀態：可被標 missed、頻率變更時可同步期限；approved/missed 是終態不在此列。 */
+/**
+ * 進行中的 instance 狀態：可被標 missed、頻率變更時可同步期限；approved/missed 是終態不在此列。
+ * ⚠️ functions/scripts/core-loop-e2e.cjs 第 20 節有手抄鏡像（RN module 無法在 node 直跑）——
+ * 改這份清單時必須同步改鏡像。
+ */
 export const IN_PROGRESS_STATUSES: readonly TaskInstanceStatus[] = [
   'pending',
   'submitted',

@@ -8,6 +8,10 @@
  * 跑法（從專案根目錄）：
  *   firebase emulators:exec --only firestore,auth 'node functions/scripts/rules-proof.cjs'
  * emulator 會載入根目錄的 firestore.rules（本分支的加固版）。
+ *
+ * 定位：本腳本是 rules 的獨立快速迴歸（不用 build functions）——R3 三條 rules 攻防
+ * （membership 直改 status、archived 提交、approved→missed 裸寫）在此都有單點案例；
+ * 含 CF 的完整攻防鏈（守衛錯誤碼、原子回滾、reactivate）見 core-loop-e2e.cjs 第 18–21 節。
  */
 const admin = require('firebase-admin');
 const { initializeApp } = require('firebase/app');
@@ -67,6 +71,17 @@ async function seed() {
     taskId: 'T', userId: KID, childId: KID, familyId: 'F', status: 'pending',
     submissionCount: 0, reviewedBy: null, pointsAwarded: null,
   });
+  // R3-4c 審查回填：封存任務＋其 pending instance（archived 提交攻防用）
+  await adb.collection('tasks').doc('TA').set({ familyId: 'F', title: '澆花(已封存)', points: 15, status: 'archived', createdBy: DAD });
+  await adb.collection('taskInstances').doc('IA').set({
+    taskId: 'TA', userId: KID, childId: KID, familyId: 'F', status: 'pending',
+    submissionCount: 0, reviewedBy: null, pointsAwarded: null,
+  });
+  // R3-6 審查回填：approved 終態 instance（approved→missed 裸寫攻防用，發點歷史不可蓋）
+  await adb.collection('taskInstances').doc('IAP').set({
+    taskId: 'T', userId: KID, childId: KID, familyId: 'F', status: 'approved',
+    submissionCount: 1, reviewedBy: DAD, pointsAwarded: 100,
+  });
   await adb.collection('rewardItems').doc('R').set({ familyId: 'F', title: '玩具', pointCost: 100, status: 'active' });
   await adb.collection('pointWallets').doc('F_' + KID).set({ familyId: 'F', childId: KID, userId: KID, balance: 50 });
   await adb.collection('pointTransactions').doc('tx1').set({ walletId: 'F_' + KID, childId: KID, delta: 50, sourceType: 'parent_grant' });
@@ -125,6 +140,12 @@ async function main() {
   await expectDenied('A6 小孩自批兌換訂單 → approved', () =>
     updateDoc(doc(db, 'rewardOrders', orderId), { status: 'approved' }));
 
+  // R3-4c 審查回填：封存任務上的提交轉移被 rules 的 archived 檢查擋下
+  // （E2E 19.3 的 rules 單點版——舊版 client 沒有 submitInstanceGuarded 也擋得住）。
+  // 正對照＝下方「正常：小孩提交任務 → submitted」（active 任務同款寫入放行）。
+  await expectDenied('R3-4c 小孩對 archived 任務直寫提交轉移', () =>
+    updateDoc(doc(db, 'taskInstances', 'IA'), { status: 'submitted', submissionCount: 1 }));
+
   // ===== 正常流程（應 ALLOWED）=====
   await expectAllowed('正常：小孩提交任務 → submitted', () =>
     updateDoc(doc(db, 'taskInstances', 'I'), { status: 'submitted', submissionCount: 1 }));
@@ -143,6 +164,11 @@ async function main() {
     updateDoc(doc(db, 'familyMemberships', 'kid2_uid_F'), { status: 'active' }));
   await expectAllowed('正常：家長改成員暱稱/頭像（不動 status）', () =>
     updateDoc(doc(db, 'familyMemberships', 'kid_uid_F'), { nickname: '小明明', avatarEmoji: '🦊' }));
+
+  // R3-6 審查回填：approved 是 client 終態（R2-CX1 狀態機矩陣），家長裸 update
+  // 標 missed 必須被擋（E2E 20.2 的 rules 單點版——markMissed 收窄的後端防線）。
+  await expectDenied('R3-6 家長裸 update approved→missed（發點歷史不可蓋）', () =>
+    updateDoc(doc(db, 'taskInstances', 'IAP'), { status: 'missed' }));
 
   // ===== 報告 =====
   console.log('\n================ 安全規則強制力證明 ================');
