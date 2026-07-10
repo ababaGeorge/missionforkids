@@ -36,7 +36,12 @@
     "inviteMember": "Invite Member",
     "members": "Family Members",
     "childName": "Child's Name",
-    "birthday": "Birthday"
+    "birthday": "Birthday",
+    "removeFailed": "Remove failed",
+    "removeNotParent": "Only a parent of this family can remove members",
+    "removeMemberNotFound": "Member not found — they may have already been removed",
+    "removeCannotRemoveSelf": "You can't remove yourself from the family",
+    "removeOnlyChildRemovable": "Only child members can be removed for now"
   },
   "tasks": {
     "title": "Tasks",

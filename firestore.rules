@@ -81,11 +81,15 @@ service cloud.firestore {
         && request.resource.data.role == 'parent'
         && request.resource.data.status == 'active'
         && get(/databases/$(database)/documents/families/$(request.resource.data.familyId)).data.createdBy == request.auth.uid;
-      // 改：只有該家庭家長可改（暱稱/頭像/移除成員），且 userId/familyId/role 不可變（擋自升 parent，A3）。
+      // 改：只有該家庭家長可改（暱稱/頭像），且 userId/familyId/role 不可變（擋自升 parent，A3）。
+      // R3-3：client 不可把 status 改成 'removed'——移除成員只走 removeFamilyMember CF
+      // （CF 同時原子作廢 pending 邀請；admin SDK 不受本規則限制）。
+      // 既有合法 client 更新只有 family.tsx handleSave（nickname/avatarEmoji，不動 status）→ 不受影響。
       allow update: if isFamilyParent(resource.data.familyId)
         && request.resource.data.userId == resource.data.userId
         && request.resource.data.familyId == resource.data.familyId
-        && request.resource.data.role == resource.data.role;
+        && request.resource.data.role == resource.data.role
+        && !(changedKeys().hasAny(['status']) && request.resource.data.status == 'removed');
       allow delete: if false;
     }
 

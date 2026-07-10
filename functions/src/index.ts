@@ -11,3 +11,4 @@ export { grantPoints } from './grantPoints';
 export { bootstrapParentAccount } from './bootstrapParentAccount';
 export { createFamilyInvite } from './createFamilyInvite';
 export { acceptFamilyInvite } from './acceptFamilyInvite';
+export { removeFamilyMember } from './removeFamilyMember';

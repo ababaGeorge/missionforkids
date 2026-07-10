@@ -72,11 +72,12 @@ async function seed() {
   await adb.collection('taskSubmissions').doc('subG').set({ taskInstanceId: 'IG', familyId: 'G', submittedBy: OUTSIDER, photoUrls: ['secret.jpg'], childNote: 'G家小孩的私密照片' });
 
   const token = await admin.auth().createCustomToken(KID);
-  return token;
+  const dadToken = await admin.auth().createCustomToken(DAD);
+  return { token, dadToken };
 }
 
 async function main() {
-  const token = await seed();
+  const { token, dadToken } = await seed();
 
   const app = initializeApp({ projectId: PROJECT_ID, apiKey: 'demo' });
   const db = getFirestore(app);
@@ -122,6 +123,13 @@ async function main() {
     getDocs(query(collection(db, 'tasks'), where('familyId', '==', 'F'), where('status', '==', 'active'))));
   await expectAllowed('正常：小孩讀自己錢包', () =>
     getDoc(doc(db, 'pointWallets', 'F_kid_uid')));
+
+  // ===== R3-3：切換成「家長」身分——移除成員只能走 removeFamilyMember CF =====
+  await signInWithCustomToken(auth, dadToken);
+  await expectDenied('R3-3 家長 client 直改 membership status → removed', () =>
+    updateDoc(doc(db, 'familyMemberships', 'kid_uid_F'), { status: 'removed' }));
+  await expectAllowed('正常：家長改成員暱稱/頭像（不動 status）', () =>
+    updateDoc(doc(db, 'familyMemberships', 'kid_uid_F'), { nickname: '小明明', avatarEmoji: '🦊' }));
 
   // ===== 報告 =====
   console.log('\n================ 安全規則強制力證明 ================');

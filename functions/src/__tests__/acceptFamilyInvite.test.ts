@@ -115,6 +115,29 @@ describe('acceptFamilyInvite', () => {
     expect(second).toEqual(first);
   });
 
+  // R3-3：removeFamilyMember 作廢的邀請不可再被接受。
+  // 現況「非 pending 即擋」自動涵蓋 revoked——本案例把這個涵蓋釘進測試，防未來改成枚舉比對漏掉。
+  it('R3-3：invite 已被作廢（revoked）→ failed-precondition INVITE_ALREADY_USED', async () => {
+    await seedInvite('inv-13', 'fam-13', {
+      status: 'revoked',
+      revokedAt: FieldValue.serverTimestamp(),
+      revokedBy: 'parent-1',
+    });
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-13' },
+        auth: { uid: 'child-uid-13', token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/INVITE_ALREADY_USED/);
+
+    const db = admin.firestore();
+    // 不得建出 membership / 錢包；invite 維持 revoked
+    const mem = await db.collection('familyMemberships').doc('child-uid-13_fam-13').get();
+    expect(mem.exists).toBe(false);
+    const invDoc = await db.collection('familyInvites').doc('inv-13').get();
+    expect(invDoc.data()!.status).toBe('revoked');
+  });
+
   it('invite 已被別人接受 → failed-precondition INVITE_ALREADY_USED', async () => {
     await seedInvite('inv-5', 'fam-5', { status: 'accepted', acceptedBy: 'someone-else' });
     await expect(

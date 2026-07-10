@@ -13,6 +13,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
@@ -570,6 +571,7 @@ function ManageMemberModal({
   familyCreatedBy: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
 
@@ -614,13 +616,21 @@ function ManageMemberModal({
           style: 'destructive',
           onPress: async () => {
             try {
-              await firestore()
-                .collection('familyMemberships')
-                .doc(member.membership.id)
-                .update({ status: 'removed' });
+              // R3-3：移除走 CF（原子完成 membership 標 removed＋作廢 pending 邀請）。
+              // rules 已禁止 client 直改 status:'removed'。
+              const fn = functions().httpsCallable('removeFamilyMember');
+              await fn({
+                familyId: member.membership.familyId,
+                memberUserId: member.membership.userId,
+              });
               onClose();
             } catch (e: any) {
-              Alert.alert('移除失敗', e?.message || '不明錯誤');
+              let msg = e?.message || '不明錯誤';
+              if (/NOT_PARENT/.test(msg)) msg = t('family.removeNotParent');
+              if (/MEMBER_NOT_FOUND/.test(msg)) msg = t('family.removeMemberNotFound');
+              if (/CANNOT_REMOVE_SELF/.test(msg)) msg = t('family.removeCannotRemoveSelf');
+              if (/ONLY_CHILD_REMOVABLE/.test(msg)) msg = t('family.removeOnlyChildRemovable');
+              Alert.alert(t('family.removeFailed'), msg);
             }
           },
         },

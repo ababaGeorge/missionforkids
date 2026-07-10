@@ -40,9 +40,13 @@ export interface FamilyMembership {
   nickname?: string | null;
   avatarEmoji?: string | null;
   childId?: string | null;
+  // R3-3：removeFamilyMember CF 移除時寫入（joinedAt 等欄位保留，只補審計欄）
+  removedAt?: Timestamp;
+  removedBy?: string;
 }
 
-export type FamilyInviteStatus = 'pending' | 'accepted' | 'expired';
+// R3-3：'revoked' = 成員被移除時，其 pending 邀請被 CF 原子作廢
+export type FamilyInviteStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
 
 export interface FamilyInviteChildProfile {
   displayName: string;
@@ -61,6 +65,9 @@ export interface FamilyInvite {
   acceptedBy: string | null;
   createdAt: Timestamp;
   expiresAt: Timestamp;
+  // R3-3：removeFamilyMember CF 作廢時寫入
+  revokedAt?: Timestamp;
+  revokedBy?: string;
 }
 
 // ============================================
