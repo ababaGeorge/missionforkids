@@ -17,6 +17,18 @@
  *     一律 PERMISSION_DENIED；合法流轉（revive、syncPeriod、正常審核）不受影響（第 16 節）。
  *   - FIX-A（347d0e1）：扣款守衛收窄——家長核准搶在扣款 trigger（prod 冷啟動 2–10 秒）
  *     之前把 pending 改成 approved，trigger 仍要照扣、寫快照、寫 ledger，不放水（第 17 節）。
+ *   - R3-1/R3-2（第 18 節）：一帳號一家庭——已在家庭 A 的小孩接家庭 B 邀請擋
+ *     ALREADY_IN_FAMILY（且被擋後零副作用）；已有 active membership 的帳號 bootstrap
+ *     擋 ALREADY_IN_FAMILY；小孩帳號 bootstrap 擋 ALREADY_CHILD。
+ *   - R3-4（第 19 節）：任務封存後，舊版 client（無 submitInstanceGuarded）直寫提交
+ *     轉移被 rules 後端擋；解除封存後同一提交放行（證明擋的就是 archived 這一刀）。
+ *   - R3-6（第 20 節）：markMissed 走收窄 helper（updateInstanceIfStatusIn 鏡像，來源限
+ *     IN_PROGRESS 三態）——approved 不被蓋掉；裸 update approved→missed 也被 rules 擋；
+ *     submitted→missed（解除指派常規路徑）仍放行。
+ *   - R3-3（第 21 節）：removeFamilyMember 全鏈——NOT_PARENT / MEMBER_NOT_FOUND /
+ *     CANNOT_REMOVE_SELF 守衛、client 直改 status→removed 被 rules 擋（暱稱更新不受影響）、
+ *     移除原子完成 membership removed＋pending 邀請 revoked、revoked 邀請不可接受/不可
+ *     pre-auth 讀、被移除成員讀家庭資料被擋、同家庭重邀 reactivate 不被 R3-1 誤擋。
  *
  * 跑法（從專案根目錄；會先 build functions）：
  *   npm --prefix functions run build && \
@@ -39,7 +51,7 @@ const { initializeApp } = require('firebase/app');
 const {
   getFirestore, connectFirestoreEmulator, doc, getDoc, setDoc, updateDoc,
   collection, getDocs, addDoc, query, where, orderBy, limit,
-  writeBatch, serverTimestamp, increment, Timestamp,
+  writeBatch, serverTimestamp, increment, Timestamp, runTransaction,
 } = require('firebase/firestore');
 const {
   getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signOut,
@@ -69,6 +81,16 @@ async function expectDenied(name, fn) {
   catch (e) {
     if (String(e && e.code).includes('permission-denied')) pass(name);
     else fail(name, `錯誤碼非 permission-denied：${e && e.code} ${e && e.message}`);
+  }
+}
+// callable 錯誤斷言：驗 HttpsError 的 code（如 failed-precondition）＋訊息內的業務錯誤碼
+async function expectCallableError(name, fn, codePart, msgPart) {
+  try { await fn(); fail(name, '應被拒但成功了'); }
+  catch (e) {
+    const code = String(e && e.code);
+    const msg = String(e && e.message);
+    if (code.includes(codePart) && (!msgPart || msg.includes(msgPart))) pass(name);
+    else fail(name, `錯誤不符：預期 ${codePart}/${msgPart ?? ''}，拿到 code=${code} msg=${msg}`);
   }
 }
 // 等 trigger 生效
@@ -735,6 +757,240 @@ async function main() {
     if (!pt.exists) throw new Error('查無扣款 ledger（FIX-A 前的守衛會在此跳過扣款，無帳可查）');
     if (pt.data().delta !== -50) throw new Error(`delta=${pt.data().delta} != -50`);
     if (pt.data().sourceType !== 'reward_order') throw new Error(`sourceType=${pt.data().sourceType}`);
+  });
+
+  // ========== 18. R3-1/R3-2：一帳號一家庭（跨家庭閘門）==========
+  // R3-1：acceptFamilyInvite 交易內查「其他家庭的 active membership」→ ALREADY_IN_FAMILY。
+  //       同家庭路徑不受影響（12.2 重複接受、21.12 reactivate 即為活體迴歸證明）。
+  // R3-2：bootstrapParentAccount 建家庭前查任何 active membership（不分角色）。
+  // 進場餘額：30（17.2 結束時）。
+  const P2 = makeClient('parent2'); // 家庭 B 的家長
+  const S = makeClient('stray');    // 有 membership 但無 user doc 的殘破帳號（R3-2 守衛主目標）
+  const dad2Email = `e2e-dad2-${runTag}@mfk.test`;
+  const strayEmail = `e2e-stray-${runTag}@mfk.test`;
+  let dad2Uid, familyBId, inviteBId, strayUid;
+  await step('18.1 第二家長註冊＋bootstrap 出家庭 B（無 membership 帳號的正路徑）', async () => {
+    const cred = await createUserWithEmailAndPassword(P2.auth, dad2Email, 'e2e-pass-789!');
+    dad2Uid = cred.user.uid;
+    const fn = httpsCallable(P2.fns, 'bootstrapParentAccount');
+    const res = await fn({ displayName: 'E2E二叔', familyName: 'E2E二家' });
+    familyBId = res.data.familyId;
+    if (!familyBId || familyBId === familyId) throw new Error(`familyBId 異常：${familyBId}`);
+  });
+  await step('18.2 家庭 B 對「已在家庭 A 的小孩」email 發邀請', async () => {
+    const fn = httpsCallable(P2.fns, 'createFamilyInvite');
+    const res = await fn({ familyId: familyBId, email: kidEmail, childName: '跨家庭小孩' });
+    inviteBId = res.data.inviteId;
+    if (!inviteBId) throw new Error('沒回 inviteId');
+  });
+  await expectCallableError('18.3 家庭 A 的小孩接受家庭 B 邀請被擋（R3-1 ALREADY_IN_FAMILY）', async () => {
+    const fn = httpsCallable(C.fns, 'acceptFamilyInvite');
+    await fn({ inviteId: inviteBId });
+  }, 'failed-precondition', 'ALREADY_IN_FAMILY');
+  await step('18.4 被擋後零副作用：B 邀請仍 pending、無 B membership/錢包、A membership 仍 active', async () => {
+    const inv = await adb.collection('familyInvites').doc(inviteBId).get();
+    if (inv.data().status !== 'pending') throw new Error(`B 邀請 status=${inv.data().status}（交易未回滾）`);
+    const mB = await adb.collection('familyMemberships').doc(`${kidUid}_${familyBId}`).get();
+    if (mB.exists) throw new Error('多出家庭 B membership');
+    const wB = await adb.collection('pointWallets').doc(`${familyBId}_${kidUid}`).get();
+    if (wB.exists) throw new Error('多出家庭 B 錢包');
+    const mA = await adb.collection('familyMemberships').doc(`${kidUid}_${familyId}`).get();
+    if (mA.data().status !== 'active') throw new Error(`A membership status=${mA.data().status}`);
+  });
+  await step('18.5 佈置殘破帳號：有 active membership、無 user doc（admin 佈置情境）', async () => {
+    const cred = await createUserWithEmailAndPassword(S.auth, strayEmail, 'e2e-pass-000!');
+    strayUid = cred.user.uid;
+    await adb.collection('familyMemberships').doc(`${strayUid}_${familyBId}`).set({
+      familyId: familyBId, userId: strayUid, childId: strayUid,
+      role: 'child', status: 'active', invitedBy: dad2Uid,
+      joinedAt: admin.firestore.FieldValue.serverTimestamp(),
+      nickname: null, avatarEmoji: null,
+    });
+  });
+  await expectCallableError('18.6 有 active membership 的帳號 bootstrap 被擋（R3-2 ALREADY_IN_FAMILY）', async () => {
+    const fn = httpsCallable(S.fns, 'bootstrapParentAccount');
+    await fn({ displayName: '不該存在的家長', familyName: '不該存在的家' });
+  }, 'failed-precondition', 'ALREADY_IN_FAMILY');
+  await step('18.7 被擋後零副作用：無 user doc、membership 仍只有 1 筆', async () => {
+    const u = await adb.collection('users').doc(strayUid).get();
+    if (u.exists) throw new Error('bootstrap 被擋卻建了 user doc');
+    const mems = await adb.collection('familyMemberships').where('userId', '==', strayUid).get();
+    if (mems.size !== 1) throw new Error(`membership 有 ${mems.size} 筆`);
+  });
+  await expectCallableError('18.8 小孩帳號 bootstrap 被擋（ALREADY_CHILD，孤兒恢復路徑不可自升家長）', async () => {
+    const fn = httpsCallable(C.fns, 'bootstrapParentAccount');
+    await fn({ displayName: '不該升級的小孩', familyName: '不該存在的家' });
+  }, 'failed-precondition', 'ALREADY_CHILD');
+
+  // ========== 19. R3-4c：任務封存後，舊版 client 直寫提交被 rules 後端擋 ==========
+  // 新版 client 的交易守衛（submitInstanceGuarded）只保護新 App；這裡模擬「沒有守衛的
+  // 舊版 client」直打 Firestore 的提交 batch，必須被 rules 的 archived 檢查擋下。
+  let task5Id, instance5Id;
+  await step('19.1 家長建第五個任務 instance（pending）', async () => {
+    const now = Timestamp.now();
+    const dueDate = Timestamp.fromMillis(Date.now() + 24 * 3600 * 1000);
+    const taskRef = await addDoc(collection(P.db, 'tasks'), {
+      familyId, title: '澆花', points: 15, frequency: 'once',
+      startDate: now, dueDate, graceDays: 2, reviewMode: 'manual',
+      assigneeType: 'individual', assigneeUserId: kidUid,
+      status: 'active', createdBy: dadUid, createdAt: now,
+    });
+    task5Id = taskRef.id;
+    const instRef = await addDoc(collection(P.db, 'taskInstances'), {
+      taskId: task5Id, userId: kidUid, childId, familyId,
+      periodStart: now, periodEnd: dueDate, gracePeriodEnd: dueDate,
+      status: 'pending', submissionCount: 0,
+      reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+    });
+    instance5Id = instRef.id;
+  });
+  await step('19.2 家長封存任務（soft delete：status → archived）', async () => {
+    await updateDoc(doc(P.db, 'tasks', task5Id), { status: 'archived' });
+  });
+  await expectDenied('19.3 封存後小孩直寫提交轉移被 rules 擋（R3-4c，舊版 client 無守衛也擋）', async () => {
+    const subRef = doc(collection(C.db, 'taskSubmissions'));
+    const batch = writeBatch(C.db);
+    batch.set(subRef, {
+      taskInstanceId: instance5Id, familyId, submittedBy: kidUid,
+      photoUrls: [], childNote: '澆了', aiResult: null, aiConfidence: null,
+      submittedAt: serverTimestamp(),
+    });
+    batch.update(doc(C.db, 'taskInstances', instance5Id), {
+      status: 'submitted', submissionCount: increment(1), submittedAt: serverTimestamp(),
+    });
+    await batch.commit();
+  });
+  await step('19.4 batch 原子回滾：instance 仍 pending、count=0、無 submission 殘留', async () => {
+    const i = await adb.collection('taskInstances').doc(instance5Id).get();
+    if (i.data().status !== 'pending') throw new Error(`status=${i.data().status}`);
+    if (i.data().submissionCount !== 0) throw new Error(`submissionCount=${i.data().submissionCount}`);
+    const subs = await adb.collection('taskSubmissions')
+      .where('taskInstanceId', '==', instance5Id).get();
+    if (!subs.empty) throw new Error(`殘留 ${subs.size} 筆 submission`);
+  });
+  await step('19.5 解除封存後同一提交放行（證明 19.3 擋的就是 archived 這一刀）', async () => {
+    await updateDoc(doc(P.db, 'tasks', task5Id), { status: 'active' });
+    const subRef = doc(collection(C.db, 'taskSubmissions'));
+    const batch = writeBatch(C.db);
+    batch.set(subRef, {
+      taskInstanceId: instance5Id, familyId, submittedBy: kidUid,
+      photoUrls: [], childNote: '真的澆了', aiResult: null, aiConfidence: null,
+      submittedAt: serverTimestamp(),
+    });
+    batch.update(doc(C.db, 'taskInstances', instance5Id), {
+      status: 'submitted', submissionCount: increment(1), submittedAt: serverTimestamp(),
+    });
+    await batch.commit();
+  });
+
+  // ========== 20. R3-6：markMissed 收窄——approved 終態不被蓋掉 ==========
+  // 鏡像 src/lib/instances.ts updateInstanceIfStatusIn（tasks.tsx markMissed 用法）：
+  // 交易內重讀 status，僅 IN_PROGRESS 三態（pending/submitted/rejected）才寫 missed。
+  // instanceId 自第 5 節起是 approved（pointsAwarded=100 的點數帳本歷史）。
+  const IN_PROGRESS_STATUSES = ['pending', 'submitted', 'rejected'];
+  async function markMissedGuarded(client, instId) {
+    await runTransaction(client.db, async (tx) => {
+      const snap = await tx.get(doc(client.db, 'taskInstances', instId));
+      if (!snap.exists()) throw new Error('INSTANCE_GONE');
+      const status = snap.data().status;
+      if (!IN_PROGRESS_STATUSES.includes(status)) throw new Error('INSTANCE_NOT_SUBMITTED');
+      tx.update(doc(client.db, 'taskInstances', instId), { status: 'missed' });
+    });
+  }
+  await step('20.1 approved instance 走收窄 helper → 交易重讀擋下、不寫入（R3-6）', async () => {
+    let threw = null;
+    try { await markMissedGuarded(P, instanceId); }
+    catch (e) { threw = String(e && e.message); }
+    if (!threw || !threw.includes('INSTANCE_NOT_SUBMITTED')) {
+      throw new Error(`預期 INSTANCE_NOT_SUBMITTED，拿到：${threw ?? '成功寫入（approved 被蓋掉）'}`);
+    }
+    const i = await adb.collection('taskInstances').doc(instanceId).get();
+    if (i.data().status !== 'approved') throw new Error(`status=${i.data().status}（終態被蓋）`);
+    if (i.data().pointsAwarded !== 100) throw new Error(`pointsAwarded=${i.data().pointsAwarded}`);
+  });
+  await expectDenied('20.2 裸 update approved→missed 也被 rules 擋（舊版 client 防禦縱深）', () =>
+    updateDoc(doc(P.db, 'taskInstances', instanceId), { status: 'missed' }));
+  await step('20.3 submitted instance 走同 helper → 成功標 missed（解除指派語意不變）', async () => {
+    await markMissedGuarded(P, instance5Id); // 19.5 提交後是 submitted
+    const i = await adb.collection('taskInstances').doc(instance5Id).get();
+    if (i.data().status !== 'missed') throw new Error(`status=${i.data().status}`);
+  });
+
+  // ========== 21. R3-3：removeFamilyMember 全鏈（守衛 → 移除＋作廢 → 擋復用 → reactivate）==========
+  // client 直改 status:'removed' 已被 rules 禁止；移除只能走 CF（原子作廢 pending 邀請）。
+  // 本節放最後：小孩會短暫被移除，末尾用同家庭重邀 reactivate 復原（同時證明 R3-1
+  // 的跨家庭守衛不誤擋同家庭 reactivate——R2-29 鏈零退化）。
+  let revInviteId;
+  await step('21.1 佈置：家長對小孩 email 再發一張 pending 邀請（待作廢標的）', async () => {
+    const fn = httpsCallable(P.fns, 'createFamilyInvite');
+    const res = await fn({ familyId, email: kidEmail, childName: '小安' });
+    revInviteId = res.data.inviteId;
+    if (!revInviteId) throw new Error('沒回 inviteId');
+  });
+  await expectCallableError('21.2 小孩（非家長）呼叫 removeFamilyMember 被擋（NOT_PARENT）', async () => {
+    const fn = httpsCallable(C.fns, 'removeFamilyMember');
+    await fn({ familyId, memberUserId: dadUid });
+  }, 'permission-denied', 'NOT_PARENT');
+  await expectCallableError('21.3 移除不存在的成員（MEMBER_NOT_FOUND）', async () => {
+    const fn = httpsCallable(P.fns, 'removeFamilyMember');
+    await fn({ familyId, memberUserId: `no-such-user-${runTag}` });
+  }, 'not-found', 'MEMBER_NOT_FOUND');
+  await expectCallableError('21.4 家長移除自己被擋（CANNOT_REMOVE_SELF）', async () => {
+    const fn = httpsCallable(P.fns, 'removeFamilyMember');
+    await fn({ familyId, memberUserId: dadUid });
+  }, 'failed-precondition', 'CANNOT_REMOVE_SELF');
+  await expectDenied('21.5 client 直改 membership status→removed 被 rules 擋（R3-3 rules 收緊）', () =>
+    updateDoc(doc(P.db, 'familyMemberships', `${kidUid}_${familyId}`), { status: 'removed' }));
+  await step('21.6 rules 零退化：家長改成員暱稱（family.tsx handleSave 路徑）仍放行', async () => {
+    await updateDoc(doc(P.db, 'familyMemberships', `${kidUid}_${familyId}`), {
+      nickname: '小安安', avatarEmoji: '🐣',
+    });
+  });
+  let joinedAtBefore;
+  await step('21.7 removeFamilyMember 成功：removed=true、revokedInvites=1', async () => {
+    const m0 = await adb.collection('familyMemberships').doc(`${kidUid}_${familyId}`).get();
+    joinedAtBefore = m0.data().joinedAt; // 移除前記下，驗證欄位保留
+    const fn = httpsCallable(P.fns, 'removeFamilyMember');
+    const res = await fn({ familyId, memberUserId: kidUid });
+    if (res.data.removed !== true) throw new Error(`removed=${res.data.removed}`);
+    if (res.data.revokedInvites !== 1) throw new Error(`revokedInvites=${res.data.revokedInvites} != 1`);
+    if (res.data.warning) throw new Error(`不該有 warning：${res.data.warning}`);
+  });
+  await step('21.8 後端驗證：membership removed（joinedAt 保留）＋邀請 revoked＋錢包不動', async () => {
+    const m = await adb.collection('familyMemberships').doc(`${kidUid}_${familyId}`).get();
+    if (m.data().status !== 'removed') throw new Error(`membership status=${m.data().status}`);
+    if (!m.data().removedAt || m.data().removedBy !== dadUid) throw new Error('removedAt/removedBy 未寫入');
+    if (!m.data().joinedAt || !m.data().joinedAt.isEqual(joinedAtBefore)) throw new Error('joinedAt 被動過');
+    const inv = await adb.collection('familyInvites').doc(revInviteId).get();
+    if (inv.data().status !== 'revoked') throw new Error(`邀請 status=${inv.data().status}`);
+    if (!inv.data().revokedAt || inv.data().revokedBy !== dadUid) throw new Error('revokedAt/revokedBy 未寫入');
+    const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
+    if (w.data().balance !== 30) throw new Error(`餘額 ${w.data().balance} != 30（移除動到錢包）`);
+  });
+  await expectCallableError('21.9 拿 revoked 邀請 accept 被擋（INVITE_ALREADY_USED）', async () => {
+    const fn = httpsCallable(C.fns, 'acceptFamilyInvite');
+    await fn({ inviteId: revInviteId });
+  }, 'failed-precondition', 'INVITE_ALREADY_USED');
+  await expectDenied('21.10 revoked 邀請未登入不可讀（A16 延伸：get 僅限 pending）', async () => {
+    const snap = await getDoc(doc(G.db, 'familyInvites', revInviteId));
+    if (snap.exists()) throw Object.assign(new Error('讀到了'), { code: 'unexpected-success' });
+  });
+  await expectDenied('21.11 被移除成員讀家庭資料被 rules 擋（A17 重演）', () =>
+    getDoc(doc(C.db, 'families', familyId)));
+  await step('21.12 同家庭重邀＋接受成功（reactivate 不被 R3-1 誤擋，R2-29 鏈零退化）', async () => {
+    const fn = httpsCallable(P.fns, 'createFamilyInvite');
+    const res = await fn({ familyId, email: kidEmail, childName: '小安' });
+    const fn2 = httpsCallable(C.fns, 'acceptFamilyInvite');
+    const res2 = await fn2({ inviteId: res.data.inviteId });
+    if (res2.data.familyId !== familyId) throw new Error('familyId 不符');
+  });
+  await step('21.13 復原驗證：membership 回 active、joinedAt/暱稱保留、錢包 30 原封不動', async () => {
+    const m = await adb.collection('familyMemberships').doc(`${kidUid}_${familyId}`).get();
+    if (m.data().status !== 'active') throw new Error(`status=${m.data().status}`);
+    if (!m.data().joinedAt.isEqual(joinedAtBefore)) throw new Error('joinedAt 被重置');
+    if (m.data().nickname !== '小安安') throw new Error(`nickname=${m.data().nickname}（被重置）`);
+    const w = await adb.collection('pointWallets').doc(`${familyId}_${childId}`).get();
+    if (w.data().balance !== 30) throw new Error(`餘額 ${w.data().balance} != 30`);
   });
 
   // ---- 報告 ----
