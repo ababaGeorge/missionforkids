@@ -38,6 +38,13 @@ const fmtTime = (ts: any): string => {
   return d.toLocaleDateString();
 };
 
+const toMillis = (ts: any): number => {
+  if (!ts) return 0;
+  if (typeof ts?.toDate === 'function') return ts.toDate().getTime();
+  const t = new Date(ts).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
+
 export default function ParentNotif() {
   const router = useRouter();
   const uid = auth().currentUser?.uid;
@@ -45,7 +52,10 @@ export default function ParentNotif() {
   const familyId = family?.id ?? null;
 
   const [notifs, setNotifs] = useState<NotifItem[]>([]);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  // 已讀水位（millis）。null = 尚未載入或從未標示已讀 → 全部視為未讀。
+  const [lastReadMs, setLastReadMs] = useState<number | null>(null);
+  // 單則點擊的本地已讀（僅本次 session UX，不持久化）。
+  const [localReadIds, setLocalReadIds] = useState<Set<string>>(new Set());
   const taskGen = useRef(0);
   const orderGen = useRef(0);
   const taskNotifs = useRef<NotifItem[]>([]);
@@ -60,6 +70,20 @@ export default function ParentNotif() {
     });
     setNotifs(all);
   };
+
+  // 掛載時讀 users/{uid}.notifLastReadAt 當初值。
+  useEffect(() => {
+    if (!uid) return;
+    firestore()
+      .collection('users')
+      .doc(uid)
+      .get()
+      .then((doc) => {
+        const ts = doc.data()?.notifLastReadAt;
+        setLastReadMs(ts ? toMillis(ts) : null);
+      })
+      .catch((e) => console.warn('[ParentNotif] read lastRead failed', (e as any)?.code));
+  }, [uid]);
 
   // Subscribe to submitted task instances
   useEffect(() => {
@@ -136,10 +160,29 @@ export default function ParentNotif() {
     return unsub;
   }, [familyId]);
 
-  const unreadCount = notifs.filter((n) => !readIds.has(n.id)).length;
+  // 未讀 = 通知時間(sortDate) > 已讀水位；水位為 null 時全部未讀。
+  // 本地單則已讀（localReadIds）額外覆蓋，僅本次 session。
+  const isUnread = (n: NotifItem) =>
+    !localReadIds.has(n.id) && (lastReadMs == null || toMillis(n.sortDate) > lastReadMs);
 
-  const markAllRead = () => setReadIds(new Set(notifs.map((n) => n.id)));
-  const markOneRead = (id: string) => setReadIds((prev) => new Set([...prev, id]));
+  const unreadCount = notifs.filter(isUnread).length;
+
+  const markAllRead = () => {
+    if (!uid) return;
+    // 樂觀水位取「當前可見通知的最大時間戳」，與 isUnread 比較的 sortDate 同為 server 時鐘，
+    // 避免裝置時鐘偏移導致漏標新通知或剛按的已讀仍顯示未讀。列表為空時退回 Date.now()（無通知可比）。
+    const maxMs = notifs.reduce((max, n) => Math.max(max, toMillis(n.sortDate)), 0);
+    setLastReadMs(maxMs > 0 ? maxMs : Date.now());
+    // 實際寫入仍用 serverTimestamp()，下次載入讀回 server 水位一致。
+    firestore()
+      .collection('users')
+      .doc(uid)
+      .set({ notifLastReadAt: firestore.FieldValue.serverTimestamp() }, { merge: true })
+      .catch((e) => console.warn('[ParentNotif] markAllRead failed', (e as any)?.code));
+  };
+
+  // lastReadAt 模型無法精確表達單則，單則點擊維持本地 UX（不持久化）。
+  const markOneRead = (id: string) => setLocalReadIds((prev) => new Set([...prev, id]));
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -170,7 +213,7 @@ export default function ParentNotif() {
             <Empty emoji="✉️" title="沒有通知" body="小孩做完任務或申請兌換會在這裡。" />
           ) : (
             notifs.map((n) => {
-              const isRead = readIds.has(n.id);
+              const isRead = !isUnread(n);
               const cfg = KIND_CONFIG[n.kind];
               return (
                 <Pressable
