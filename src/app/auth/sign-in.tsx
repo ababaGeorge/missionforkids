@@ -6,6 +6,7 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   ScrollView,
   Platform,
   Keyboard,
@@ -16,10 +17,11 @@ import { useTranslation } from 'react-i18next';
 import auth from '@react-native-firebase/auth';
 import { useRouter } from 'expo-router';
 import { registerParent } from '../../lib/auth/registerParent';
+import { extractInviteId } from '../../lib/inviteLink';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { P, spacing, radius, shadow } from '../../design/tokens';
 import { Starfield } from '../../design/Starfield';
-import { Display, BodySm, Label, AppText } from '../../design/Text';
+import { Display, H3, BodySm, Label, AppText } from '../../design/Text';
 
 // dev 測試帳號（由 scripts/seed-dev-family.ts 建立的固定真帳號）。
 // __DEV__-gated，production build 會被移除。
@@ -64,6 +66,11 @@ export default function SignIn() {
   const [displayName, setDisplayName] = useState('');
   const [familyName, setFamilyName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  // 小孩端邀請入口：試用家庭收不到邀請信（Resend sandbox 限制），
+  // 家長會把邀請連結分享到小孩裝置——這裡貼上整段訊息或連結即可進邀請頁。
+  const [showInviteLink, setShowInviteLink] = useState(false);
+  const [inviteLinkText, setInviteLinkText] = useState('');
+  const [inviteLinkError, setInviteLinkError] = useState('');
 
   const handleGoogleSignIn = async () => {
     Alert.alert(
@@ -152,6 +159,19 @@ export default function SignIn() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGoToInvite = () => {
+    // extractInviteId 已限制 charset（[A-Za-z0-9_-]），不會有路徑注入
+    const id = extractInviteId(inviteLinkText);
+    if (!id) {
+      setInviteLinkError('無法辨識邀請連結，請確認有完整複製邀請訊息');
+      return;
+    }
+    setShowInviteLink(false);
+    setInviteLinkText('');
+    setInviteLinkError('');
+    router.push(`/invite/${id}` as any);
   };
 
   // dev：把固定真帳號（seed 建立）填入欄位，走正式 email/密碼登入。
@@ -278,6 +298,18 @@ export default function SignIn() {
                   >
                     <BodySm style={{ color: P.muted, textAlign: 'center' }}>{authMode === 'signin' ? '沒有帳號？註冊' : '已有帳號？登入'}</BodySm>
                   </Pressable>
+                  <Pressable
+                    testID="have-invite-link"
+                    onPress={() => {
+                      setInviteLinkText('');
+                      setInviteLinkError('');
+                      setShowInviteLink(true);
+                    }}
+                  >
+                    <BodySm style={{ color: P.muted, textAlign: 'center' }}>
+                      收到家庭邀請？我有邀請連結
+                    </BodySm>
+                  </Pressable>
                 </View>
 
                 <Label style={styles.sectionLabel}>{t('auth.parentSignIn')}</Label>
@@ -335,6 +367,56 @@ export default function SignIn() {
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* 我有邀請連結：貼上家長分享的整段訊息或連結（modal 慣例同 family.tsx） */}
+      <Modal visible={showInviteLink} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={modalStyles.overlay}>
+              <View style={modalStyles.sheet}>
+                <H3 style={{ marginBottom: spacing.md }}>我有邀請連結</H3>
+                <TextInput
+                  testID="invite-link-input"
+                  style={[modalStyles.input, modalStyles.multiline]}
+                  placeholder="貼上邀請連結"
+                  placeholderTextColor={P.muted}
+                  multiline
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={inviteLinkText}
+                  onChangeText={(v) => {
+                    setInviteLinkText(v);
+                    setInviteLinkError('');
+                  }}
+                />
+                {inviteLinkError ? (
+                  <BodySm testID="invite-link-error" style={styles.errorText}>
+                    {inviteLinkError}
+                  </BodySm>
+                ) : null}
+                <View style={modalStyles.actions}>
+                  <Pressable
+                    onPress={() => setShowInviteLink(false)}
+                    style={modalStyles.cancel}
+                  >
+                    <Label style={{ color: P.muted }}>取消</Label>
+                  </Pressable>
+                  <Pressable
+                    testID="invite-link-go"
+                    onPress={handleGoToInvite}
+                    style={modalStyles.save}
+                  >
+                    <Label style={{ color: P.bg }}>前往邀請</Label>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -454,5 +536,59 @@ const styles = StyleSheet.create({
     color: P.muted,
     fontSize: 13,
     fontWeight: '700',
+  },
+});
+
+// modal 慣例同 family.tsx（overlay + 底部 sheet）
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: P.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: P.border,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  input: {
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: P.border,
+    backgroundColor: P.bg,
+    color: P.text,
+    fontSize: 15,
+    marginBottom: 12,
+  },
+  multiline: {
+    minHeight: 96,
+    textAlignVertical: 'top',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: spacing.md,
+  },
+  cancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: P.border,
+    alignItems: 'center',
+  },
+  save: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.full,
+    backgroundColor: P.primary,
+    alignItems: 'center',
   },
 });
