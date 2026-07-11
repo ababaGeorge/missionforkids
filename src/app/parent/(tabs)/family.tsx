@@ -7,6 +7,7 @@ import {
   TextInput,
   Modal,
   Alert,
+  Share,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
@@ -20,6 +21,7 @@ import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import type { Family, FamilyMembership, User } from '../../../types/models';
 import { createFamilyInvite } from '../../../lib/familyInvite';
+import { buildInviteLink } from '../../../lib/inviteLink';
 import { resolveMemberUser } from '../../../lib/memberName';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
@@ -134,17 +136,41 @@ export default function FamilyScreen() {
     if (!family || !inviteEmail.trim() || !inviteName.trim()) return;
     try {
       setInviting(true);
-      const { emailSent } = await createFamilyInvite({
+      const childName = inviteName.trim();
+      const { inviteId, emailSent } = await createFamilyInvite({
         familyId: family.id,
         email: inviteEmail.trim(),
-        childName: inviteName.trim(),
+        childName,
       });
       setInviteEmail('');
       setInviteName('');
       setShowInviteEmail(false);
+      // 試用期 Resend sandbox 只能寄給開發者本人 → 邀請信常常到不了。
+      // 主要交付路徑改為家長手動分享邀請連結（deep link），email 只是輔助。
+      const shareInviteLink = async () => {
+        const message = [
+          `【Mission for Kids】邀請 ${childName} 加入家庭`,
+          '1. 在小孩的裝置打開 Mission for Kids App',
+          '2. 點登入頁的「我有邀請連結」',
+          '3. 貼上下面整段連結：',
+          buildInviteLink(inviteId),
+          '（連結 7 天內有效）',
+        ].join('\n');
+        try {
+          await Share.share({ message });
+        } catch {
+          // 取消分享不當錯誤
+        }
+      };
       Alert.alert(
-        '邀請已送出',
-        emailSent ? '邀請信已寄出，請小孩查看信箱。' : '邀請已建立，但寄信失敗，稍後可重寄。'
+        '邀請已建立',
+        emailSent
+          ? '邀請信已寄出。最可靠的方式是直接把邀請連結分享給小孩的裝置。'
+          : '寄信未成功，請直接把邀請連結分享給小孩的裝置。',
+        [
+          { text: '分享邀請連結', onPress: () => { void shareInviteLink(); } },
+          { text: '稍後再說', style: 'cancel' },
+        ]
       );
     } catch (e: any) {
       Alert.alert('邀請失敗', e?.message ?? '請重試');
