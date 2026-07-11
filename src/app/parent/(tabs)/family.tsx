@@ -62,6 +62,13 @@ export default function FamilyScreen() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviting, setInviting] = useState(false);
+  // R4 審查修正：Alert 是一次性的——家長點掉之後，App 內要有地方能重新分享
+  // 既有邀請的連結（rules 鎖 familyInvites list，做不了 pending 列表，先記住
+  // 本 session 最後一筆邀請）。App 重開後遺失 → 指南 FAQ 引導重新邀請一次。
+  const [lastInvite, setLastInvite] = useState<{
+    inviteId: string;
+    childName: string;
+  } | null>(null);
   const [showGrant, setShowGrant] = useState(false);
   const [grantTarget, setGrantTarget] = useState<{ userId: string; name: string } | null>(null);
   const [grantAmount, setGrantAmount] = useState('10');
@@ -132,6 +139,24 @@ export default function FamilyScreen() {
     }
   };
 
+  // 試用期 Resend sandbox 只能寄給開發者本人 → 邀請信常常到不了。
+  // 主要交付路徑改為家長手動分享邀請連結（deep link），email 只是輔助。
+  const shareInviteLink = async (inviteId: string, childName: string) => {
+    const message = [
+      `【Mission for Kids】邀請 ${childName} 加入家庭`,
+      '1. 在小孩的裝置打開 Mission for Kids App',
+      '2. 點登入頁的「我有邀請連結」',
+      '3. 貼上下面整段連結：',
+      buildInviteLink(inviteId),
+      '（連結 7 天內有效）',
+    ].join('\n');
+    try {
+      await Share.share({ message });
+    } catch {
+      // 取消分享不當錯誤
+    }
+  };
+
   const handleInviteByEmail = async () => {
     if (!family || !inviteEmail.trim() || !inviteName.trim()) return;
     try {
@@ -145,31 +170,20 @@ export default function FamilyScreen() {
       setInviteEmail('');
       setInviteName('');
       setShowInviteEmail(false);
-      // 試用期 Resend sandbox 只能寄給開發者本人 → 邀請信常常到不了。
-      // 主要交付路徑改為家長手動分享邀請連結（deep link），email 只是輔助。
-      const shareInviteLink = async () => {
-        const message = [
-          `【Mission for Kids】邀請 ${childName} 加入家庭`,
-          '1. 在小孩的裝置打開 Mission for Kids App',
-          '2. 點登入頁的「我有邀請連結」',
-          '3. 貼上下面整段連結：',
-          buildInviteLink(inviteId),
-          '（連結 7 天內有效）',
-        ].join('\n');
-        try {
-          await Share.share({ message });
-        } catch {
-          // 取消分享不當錯誤
-        }
-      };
+      setLastInvite({ inviteId, childName });
       Alert.alert(
         '邀請已建立',
         emailSent
           ? '邀請信已寄出。最可靠的方式是直接把邀請連結分享給小孩的裝置。'
           : '寄信未成功，請直接把邀請連結分享給小孩的裝置。',
         [
-          { text: '分享邀請連結', onPress: () => { void shareInviteLink(); } },
-          { text: '稍後再說', style: 'cancel' },
+          {
+            text: '分享邀請連結',
+            onPress: () => { void shareInviteLink(inviteId, childName); },
+          },
+          // R4 審查修正：原文案「稍後再說」暗示之後還能分享，但 Alert 關掉就沒了
+          // → 改成不誤導的「知道了」；補救入口是下面小孩區塊的「分享邀請連結」列。
+          { text: '知道了', style: 'cancel' },
         ]
       );
     } catch (e: any) {
@@ -371,6 +385,31 @@ export default function FamilyScreen() {
                 </Pressable>
               </Pressable>
             ))
+          )}
+          {/* R4 審查修正：邀請建立後 Alert 一關就沒有地方能重新分享連結
+              → 這裡保留本 session 最後一筆邀請的重分享入口（App 重開後
+              遺失 → FAQ 引導重新邀請一次）。 */}
+          {lastInvite && (
+            <View style={styles.memberRow}>
+              <View style={{ flex: 1 }}>
+                <H3 style={{ fontSize: 15 }}>{lastInvite.childName}</H3>
+                <Muted style={{ fontSize: 11, marginTop: 2 }}>
+                  已送出邀請・連結 7 天內有效
+                </Muted>
+              </View>
+              <Pressable
+                testID="reshare-invite-link"
+                onPress={() => {
+                  void shareInviteLink(lastInvite.inviteId, lastInvite.childName);
+                }}
+                style={styles.grantPill}
+                hitSlop={8}
+              >
+                <Label style={{ color: P.primary, fontSize: 11 }}>
+                  分享邀請連結
+                </Label>
+              </Pressable>
+            </View>
           )}
         </View>
 
