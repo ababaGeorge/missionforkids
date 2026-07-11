@@ -16,6 +16,9 @@ export interface User {
   createdAt: Timestamp;
   // 小孩專用：點數釘 childId（值預設 = 當下 uid）。家長為 undefined。
   childId?: string;
+  // 通知已讀水位：本人「全部標示已讀」時寫入 serverTimestamp。
+  // 未讀判斷＝通知時間 > notifLastReadAt；null/undefined 視為全部未讀。
+  notifLastReadAt?: Timestamp | null;
 }
 
 export interface Family {

@@ -50,11 +50,20 @@ service cloud.firestore {
     // get：放行已登入者讀單一 doc（家長需用 uid 直查小孩 user doc 顯示名字；
     //      uid 已無法被枚舉——familyMemberships list 已鎖，外人拿不到其他家庭的 uid）。
     // list：只能查自己（authProviderId == 自己 uid），擋掉全表 email 枚舉（A5）。
+    // create：本人 uid 限定；註冊需寫入完整 doc（roleType/authProviderId/email…），不設白名單。
+    // update：#3 privilege escalation 修正——原本「本人可寫任意欄位」讓小孩能自寫
+    //   roleType:'parent' 自升家長（繞過 bootstrapParentAccount 的 ALREADY_CHILD 守衛）。
+    //   收緊成欄位白名單：只放行 notifLastReadAt（目前全 repo 唯一的 client→users 直寫路徑，
+    //   通知已讀時間戳）。roleType/childId/authProviderId/email/createdAt/id 天然被鎖，
+    //   client 一律不可改（身分/角色欄位只由 CF(admin) 寫，admin SDK 不受本規則限制）。
+    //   未來若要開放 client 改 profile（displayName/avatarUrl/birthday），在白名單追加即可——
+    //   但絕不放行 roleType/childId/authProviderId。
     match /users/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn() && resource.data.authProviderId == request.auth.uid;
       allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId
+        && changedKeys().hasOnly(['notifLastReadAt']);
     }
 
     // ========== Families ==========

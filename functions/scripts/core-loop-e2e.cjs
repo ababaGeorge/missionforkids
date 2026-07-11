@@ -1007,6 +1007,94 @@ async function main() {
     if (w.data().balance !== 30) throw new Error(`餘額 ${w.data().balance} != 30`);
   });
 
+  // ========== 22. Rollover：週期任務自動結算 / 建下一期（A. Rollover 收割 PR#8）==========
+  // 呼叫收割進來的核心 rolloverRecurringTasks(db, now)——與排程殼共用同一支純邏輯，
+  // 排程本身 emulator 不觸發，故此處直接以 admin SDK 造過期 instance 再呼叫核心。
+  // 斷言：pending 過補交期 → missed ＋ 建今日新 pending；submitted 過補交期不被動。
+  // 用 runTag 命名隔離，避免常駐 emulator 重跑相撞、也不干擾前面各節的資料。
+  const { rolloverRecurringTasks } = require('../lib/lib/recurrence');
+  const roTaskId = `roTask-${runTag}`;
+  const roKidA = `roKidA-${runTag}`; // pending → 應 missed
+  const roKidB = `roKidB-${runTag}`; // submitted → 應保留
+  const roKidC = `roKidC-${runTag}`; // 已移除成員 → 幽靈任務防線：不標 missed、不建下一期
+  const roI1Id = `roI1-${runTag}`;
+  const roI2Id = `roI2-${runTag}`;
+  const roI3Id = `roI3-${runTag}`;
+  const roNow = new Date();
+  const roPrevDue = new Date(roNow.getTime() - 24 * 3600 * 1000); // 昨天到期
+  const roGraceEnd = new Date(roNow.getTime() - 12 * 3600 * 1000); // 補交期昨天已過
+  const roPeriodStart = new Date(roNow.getTime() - 48 * 3600 * 1000);
+  await step('22.1 佈置：active daily 任務＋三個昨天到期的 instance（pending / submitted / 已移除成員）', async () => {
+    await adb.collection('tasks').doc(roTaskId).set({
+      familyId, title: '倒垃圾', points: 10, status: 'active',
+      frequency: 'daily', graceDays: 2,
+    });
+    // rollover 現在會查 familyMemberships/{userId}_{familyId} 確認 active，故 A/B 需造 active membership，
+    // C 造 removed membership（幽靈任務防線的反例）。
+    await adb.collection('familyMemberships').doc(`${roKidA}_${familyId}`).set({
+      familyId, userId: roKidA, childId: roKidA, role: 'child', status: 'active',
+    });
+    await adb.collection('familyMemberships').doc(`${roKidB}_${familyId}`).set({
+      familyId, userId: roKidB, childId: roKidB, role: 'child', status: 'active',
+    });
+    await adb.collection('familyMemberships').doc(`${roKidC}_${familyId}`).set({
+      familyId, userId: roKidC, childId: roKidC, role: 'child', status: 'removed',
+    });
+    await adb.collection('taskInstances').doc(roI1Id).set({
+      taskId: roTaskId, userId: roKidA, childId: roKidA, familyId,
+      status: 'pending', submissionCount: 0,
+      reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+      periodStart: admin.firestore.Timestamp.fromDate(roPrevDue),
+      periodEnd: admin.firestore.Timestamp.fromDate(roPrevDue),
+      gracePeriodEnd: admin.firestore.Timestamp.fromDate(roGraceEnd),
+    });
+    await adb.collection('taskInstances').doc(roI2Id).set({
+      taskId: roTaskId, userId: roKidB, childId: roKidB, familyId,
+      status: 'submitted', submissionCount: 1,
+      reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+      periodStart: admin.firestore.Timestamp.fromDate(roPrevDue),
+      periodEnd: admin.firestore.Timestamp.fromDate(roPrevDue),
+      gracePeriodEnd: admin.firestore.Timestamp.fromDate(roGraceEnd),
+    });
+    await adb.collection('taskInstances').doc(roI3Id).set({
+      taskId: roTaskId, userId: roKidC, childId: roKidC, familyId,
+      status: 'pending', submissionCount: 0,
+      reviewedBy: null, reviewedAt: null, pointsAwarded: null,
+      periodStart: admin.firestore.Timestamp.fromDate(roPrevDue),
+      periodEnd: admin.firestore.Timestamp.fromDate(roPrevDue),
+      gracePeriodEnd: admin.firestore.Timestamp.fromDate(roGraceEnd),
+    });
+  });
+  await step('22.2 呼叫 rolloverRecurringTasks(adb, now)——過期結算 + 建下一期', async () => {
+    await rolloverRecurringTasks(adb, roNow);
+  });
+  await step('22.3 pending 過補交期 → 標 missed（roKidA）', async () => {
+    const i = await adb.collection('taskInstances').doc(roI1Id).get();
+    if (i.data().status !== 'missed') throw new Error(`舊 instance status=${i.data().status}（預期 missed）`);
+  });
+  await step('22.4 出現一筆今天的新 pending instance（roKidA 下一期）', async () => {
+    const snap = await adb.collection('taskInstances')
+      .where('taskId', '==', roTaskId).where('userId', '==', roKidA).get();
+    const next = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .find((x) => x.id !== roI1Id && x.status === 'pending');
+    if (!next) throw new Error('沒建出新的 pending instance');
+    const nd = next.periodEnd.toDate();
+    if (nd.getFullYear() !== roNow.getFullYear() || nd.getMonth() !== roNow.getMonth() || nd.getDate() !== roNow.getDate()) {
+      throw new Error(`新 instance periodEnd=${nd.toISOString()} 非今日`);
+    }
+  });
+  await step('22.5 submitted 過補交期不被動（roKidB 仍 submitted）', async () => {
+    const i = await adb.collection('taskInstances').doc(roI2Id).get();
+    if (i.data().status !== 'submitted') throw new Error(`submitted instance status=${i.data().status}（不該被動）`);
+  });
+  await step('22.6 已移除成員（roKidC）：舊 pending 不標 missed、且不建下一期（幽靈任務防線）', async () => {
+    const i = await adb.collection('taskInstances').doc(roI3Id).get();
+    if (i.data().status !== 'pending') throw new Error(`已移除成員舊 instance status=${i.data().status}（不該被標 missed）`);
+    const snap = await adb.collection('taskInstances')
+      .where('taskId', '==', roTaskId).where('userId', '==', roKidC).get();
+    if (snap.size !== 1) throw new Error(`已移除成員被建了下一期（instance 共 ${snap.size} 筆，預期 1）`);
+  });
+
   // ---- 報告 ----
   console.log('\n================ 核心迴圈 E2E 實測結果 ================');
   for (const r of results) {
