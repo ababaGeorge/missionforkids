@@ -82,6 +82,12 @@ async function seed() {
     taskId: 'T', userId: KID, childId: KID, familyId: 'F', status: 'approved',
     submissionCount: 1, reviewedBy: DAD, pointsAwarded: 100,
   });
+  // #3 privilege escalation 攻防用：小孩本人的 users doc（含身分/角色欄位＋通知已讀戳）
+  await adb.collection('users').doc(KID).set({
+    id: KID, authProviderId: KID, roleType: 'child', childId: KID,
+    email: 'kid@demo.test', displayName: '小孩', createdAt: new Date('2026-01-01'),
+    notifLastReadAt: null,
+  });
   await adb.collection('rewardItems').doc('R').set({ familyId: 'F', title: '玩具', pointCost: 100, status: 'active' });
   await adb.collection('pointWallets').doc('F_' + KID).set({ familyId: 'F', childId: KID, userId: KID, balance: 50 });
   await adb.collection('pointTransactions').doc('tx1').set({ walletId: 'F_' + KID, childId: KID, delta: 50, sourceType: 'parent_grant' });
@@ -112,6 +118,13 @@ async function main() {
 
   await expectDenied('A3b 在別人家庭 G 建 parent membership', () =>
     setDoc(doc(db, 'familyMemberships', 'kid_uid_G'), { familyId: 'G', userId: 'kid_uid', role: 'parent', status: 'active' }));
+
+  // #3 privilege escalation：小孩自寫 users doc 的 roleType → parent 自升家長。
+  // 舊 rules（allow update: if uid==userId，無欄位白名單）此攻擊會「成功」（漏洞：
+  // 繞過 bootstrapParentAccount 的 ALREADY_CHILD 自升防護）；新 rules 加了
+  // changedKeys().hasOnly(['notifLastReadAt']) 白名單，roleType 不在其中 → permission-denied。
+  await expectDenied('#3 小孩自寫 users.roleType → parent（自升家長）', () =>
+    updateDoc(doc(db, 'users', 'kid_uid'), { roleType: 'parent' }));
 
   // R3 審查修正：client 直建 family＋自己的 parent membership（繞過 bootstrapParentAccount
   // 的 ALREADY_IN_FAMILY 守衛、自開第二個家庭）——create 已全面收回，一律 DENIED。
@@ -153,6 +166,10 @@ async function main() {
     getDocs(query(collection(db, 'tasks'), where('familyId', '==', 'F'), where('status', '==', 'active'))));
   await expectAllowed('正常：小孩讀自己錢包', () =>
     getDoc(doc(db, 'pointWallets', 'F_kid_uid')));
+  // #3 正對照：白名單放行的 notifLastReadAt 更新（通知已讀功能）在新 rules 下仍成功——
+  // 收緊權限沒有誤傷唯一合法的 client→users 直寫路徑。
+  await expectAllowed('正常：小孩更新自己的 notifLastReadAt（通知已讀）', () =>
+    updateDoc(doc(db, 'users', 'kid_uid'), { notifLastReadAt: new Date() }));
 
   // ===== R3-3：切換成「家長」身分——移除成員只能走 removeFamilyMember CF =====
   await signInWithCustomToken(auth, dadToken);
