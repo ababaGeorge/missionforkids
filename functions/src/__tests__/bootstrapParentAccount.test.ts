@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import functionsTest from 'firebase-functions-test';
 import { bootstrapParentAccount } from '../bootstrapParentAccount';
 
@@ -57,6 +58,72 @@ describe('bootstrapParentAccount', () => {
     // 不得建立 users/{uid} 遮蔽 legacy child doc
     const shadowDoc = await db.collection('users').doc(uid).get();
     expect(shadowDoc.exists).toBe(false);
+    const fams = await db.collection('families').where('createdBy', '==', uid).get();
+    expect(fams.size).toBe(0);
+  });
+
+  it('R3-2：已有任一家庭的 active membership → ALREADY_IN_FAMILY，不建 family 不寫 user doc', async () => {
+    const uid = 'member-uid-3';
+    const db = admin.firestore();
+    // 帳號已是某家庭的 active 成員（users doc 缺失的異常資料也要擋——守衛只看 membership）
+    await db.collection('familyMemberships').doc(`${uid}_fam-z`).set({
+      familyId: 'fam-z', userId: uid, role: 'child', status: 'active',
+      invitedBy: 'parent-x', joinedAt: FieldValue.serverTimestamp(),
+    });
+    await expect(
+      wrap()({ data: { displayName: '想開新家', familyName: '第二家庭' }, auth: { uid, token: { email: 'multi@example.com' } } } as any)
+    ).rejects.toThrow(/ALREADY_IN_FAMILY/);
+    // 交易整體回滾：不建 family、不建 users/{uid}
+    const fams = await db.collection('families').where('createdBy', '==', uid).get();
+    expect(fams.size).toBe(0);
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.exists).toBe(false);
+  });
+
+  it('R3-2：曾有 membership 但已 removed（非 active）→ 可建立新家庭', async () => {
+    const uid = 'member-uid-4';
+    const db = admin.firestore();
+    await db.collection('familyMemberships').doc(`${uid}_fam-old`).set({
+      familyId: 'fam-old', userId: uid, role: 'child', status: 'removed',
+      invitedBy: 'parent-x', joinedAt: FieldValue.serverTimestamp(),
+    });
+    const res: any = await wrap()({
+      data: { displayName: '重新開始', familyName: '新家庭' },
+      auth: { uid, token: { email: 'fresh@example.com' } },
+    } as any);
+    expect(res.familyId).toBeTruthy();
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${res.familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ role: 'parent', status: 'active' });
+  });
+
+  it('R3 審查修正：user doc 已存在（parent、無 active membership）→ 建家庭但不覆寫 user doc（可不帶 displayName）', async () => {
+    const uid = 'existing-parent-uid-1';
+    const db = admin.firestore();
+    // 情境：家長被移出家庭後，從 family 頁重建家庭（client 已改走本 CF，只帶 familyName）
+    await db.collection('users').doc(uid).set({
+      displayName: '原本的名字', roleType: 'parent', avatarUrl: 'a.png', birthday: '1990-01-01',
+      authProvider: 'password', authProviderId: uid, email: 'keep@example.com',
+    });
+    const res: any = await wrap()({
+      data: { familyName: '重建的家' },
+      auth: { uid, token: { email: 'keep@example.com' } },
+    } as any);
+    expect(res.familyId).toBeTruthy();
+    // user doc 原欄位一律保留，不被整份覆寫
+    const userDoc = await db.collection('users').doc(uid).get();
+    expect(userDoc.data()).toMatchObject({
+      displayName: '原本的名字', avatarUrl: 'a.png', birthday: '1990-01-01', roleType: 'parent',
+    });
+    const memDoc = await db.collection('familyMemberships').doc(`${uid}_${res.familyId}`).get();
+    expect(memDoc.data()).toMatchObject({ userId: uid, role: 'parent', status: 'active' });
+  });
+
+  it('R3 審查修正：user doc 不存在且未帶 displayName → invalid-argument，不建 family', async () => {
+    const uid = 'no-doc-no-name-uid-1';
+    await expect(
+      wrap()({ data: { familyName: '沒名字的家' }, auth: { uid, token: { email: 'x@example.com' } } } as any)
+    ).rejects.toThrow(/displayName/);
+    const db = admin.firestore();
     const fams = await db.collection('families').where('createdBy', '==', uid).get();
     expect(fams.size).toBe(0);
   });

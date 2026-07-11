@@ -60,8 +60,10 @@ service cloud.firestore {
     // ========== Families ==========
     match /families/{familyId} {
       allow read: if isFamilyMember(familyId);
-      // 建家庭：client 端 handleCreateFamily 直接寫，createdBy 必須是自己
-      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      // R3 審查修正：建家庭只走 bootstrapParentAccount CF（admin，不受本規則限制）。
+      // 原本放行 client 直建（handleCreateFamily 直寫）會讓惡意/舊 client 繞過
+      // CF 的 ALREADY_IN_FAMILY 守衛（一帳號一家庭），自建第二個家庭。
+      allow create: if false;
       allow update: if isFamilyParent(familyId);
     }
 
@@ -73,19 +75,21 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid ||
         isFamilyMember(resource.data.familyId)
       );
-      // 建：只允許「在自己剛建立的家庭、為自己、建 parent membership」。
-      // 子帳號/跨家庭的 membership 一律由 Cloud Functions(admin) 建立，不走這條（A3）。
-      allow create: if isSignedIn()
-        && membershipId == request.auth.uid + '_' + request.resource.data.familyId
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.role == 'parent'
-        && request.resource.data.status == 'active'
-        && get(/databases/$(database)/documents/families/$(request.resource.data.familyId)).data.createdBy == request.auth.uid;
-      // 改：只有該家庭家長可改（暱稱/頭像/移除成員），且 userId/familyId/role 不可變（擋自升 parent，A3）。
+      // R3 審查修正：membership 一律由 Cloud Functions(admin) 建立
+      // （bootstrapParentAccount / acceptFamilyInvite），client 不可直建——
+      // 原本的「自己剛建立的家庭可自建 parent membership」條款與 client 直建
+      // family 一起構成繞過 ALREADY_IN_FAMILY 守衛的直寫路徑（A3 加強版）。
+      allow create: if false;
+      // 改：只有該家庭家長可改（暱稱/頭像），且 userId/familyId/role 不可變（擋自升 parent，A3）。
+      // R3-3＋R3 審查修正：status 完全不可由 client 改——移除只走 removeFamilyMember CF、
+      // reactivate 只走 acceptFamilyInvite CF（原本只禁寫成 'removed'，家長仍可把
+      // removed 翻回 'active'，重造雙 active membership）。admin SDK 不受本規則限制。
+      // 既有合法 client 更新只有 family.tsx handleSave（nickname/avatarEmoji，不動 status）→ 不受影響。
       allow update: if isFamilyParent(resource.data.familyId)
         && request.resource.data.userId == resource.data.userId
         && request.resource.data.familyId == resource.data.familyId
-        && request.resource.data.role == resource.data.role;
+        && request.resource.data.role == resource.data.role
+        && !changedKeys().hasAny(['status']);
       allow delete: if false;
     }
 
@@ -167,11 +171,16 @@ service cloud.firestore {
         ||
         (
           // ---- 非家長成員（小孩）----
-          // 提交：pending / rejected → submitted（batch 同步寫計數與時間）
+          // 提交：pending / rejected → submitted（交易同步寫計數與時間）
+          // R3-4c：task 已封存（soft delete）→ 拒絕提交。client 交易守衛
+          // （submitInstanceGuarded）只存在於新版 App，這裡把後端也關上，
+          // 舊版 client / 直打 API 一樣擋住。task doc 不存在時 get() 取 data
+          // 會 error → 條件為 false → 同樣拒絕，語意正確。
           (
             resource.data.status in ['pending', 'rejected']
             && request.resource.data.status == 'submitted'
             && changedKeys().hasOnly(['status', 'submissionCount', 'submittedAt'])
+            && get(/databases/$(database)/documents/tasks/$(resource.data.taskId)).data.status != 'archived'
           )
           ||
           // 重試/重拍：rejected → pending
@@ -186,6 +195,10 @@ service cloud.firestore {
 
     // ========== Task Submissions ==========
     // A4 修復：read 加家庭隔離（client 查詢已改為帶 where familyId）。
+    // 已知接受的邊界（R3-4 審查揭露）：create 不查對應 task 是否 archived——對封存任務
+    // 單獨 create 一筆 submission 會成功、留下孤兒 doc。無點數/審核影響（審核流讀的是
+    // submitted 的 taskInstance，該轉移已被上方 archived 檢查擋住）；要擋需對每筆 create
+    // 多兩次 get()（submission 只有 taskInstanceId，得 instance→task 兩跳），成本不值。
     match /taskSubmissions/{submissionId} {
       allow read: if isFamilyMember(resource.data.familyId);
       // 小孩提交：必須是該家庭成員、submittedBy 是自己

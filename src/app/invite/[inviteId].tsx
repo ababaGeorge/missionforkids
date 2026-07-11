@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, StyleSheet, TextInput, Alert, ActivityIndicator, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { P, spacing, radius, shadow } from '../../design/tokens';
 import { Starfield } from '../../design/Starfield';
@@ -11,6 +12,7 @@ import type { FamilyInvite } from '../../types/models';
 
 export default function AcceptInvite() {
   const { inviteId } = useLocalSearchParams<{ inviteId: string }>();
+  const { t } = useTranslation();
   const router = useRouter();
   const [invite, setInvite] = useState<FamilyInvite | null>(null);
   const [loadingInvite, setLoadingInvite] = useState(true);
@@ -50,6 +52,8 @@ export default function AcceptInvite() {
       if (/INVITE_ALREADY_USED/.test(msg)) msg = '邀請已被使用';
       if (/INVALID_INVITE/.test(msg)) msg = '邀請無效';
       if (/ALREADY_PARENT/.test(msg)) msg = '這個 Email 是家長帳號，不能用小孩邀請加入';
+      // R3-1：CF 擋跨家庭雙 active membership（一帳號一家庭）
+      if (/ALREADY_IN_FAMILY/.test(msg)) msg = t('auth.alreadyInFamily');
       if (/EMAIL_TAKEN_PASSWORD_MISMATCH/.test(msg)) msg = '這個 Email 已經註冊過但密碼不符，請輸入原本設定的密碼';
       Alert.alert('無法加入', msg);
     } finally {

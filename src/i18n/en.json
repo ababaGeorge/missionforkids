@@ -27,7 +27,8 @@
     "forgotPassword": "Forgot password?",
     "resetEmailSent": "Reset email sent. Please check your inbox.",
     "resetEmailEmptyEmail": "Please enter your email first",
-    "resetEmailFailed": "Couldn't send the reset email. Please try again later."
+    "resetEmailFailed": "Couldn't send the reset email. Please try again later.",
+    "alreadyInFamily": "You already belong to another family. Leave it before joining a new one."
   },
   "family": {
     "createFamily": "Create Family",
@@ -35,7 +36,15 @@
     "inviteMember": "Invite Member",
     "members": "Family Members",
     "childName": "Child's Name",
-    "birthday": "Birthday"
+    "birthday": "Birthday",
+    "removeFailed": "Remove failed",
+    "removeNotParent": "Only a parent of this family can remove members",
+    "removeMemberNotFound": "Member not found — they may have already been removed",
+    "removeCannotRemoveSelf": "You can't remove yourself from the family",
+    "removeOnlyChildRemovable": "Only child members can be removed for now",
+    "removeDoneTitle": "Member removed",
+    "removeInviteNotRevoked": "This member's profile has no email, so invites sent to them couldn't be revoked automatically. Unused invite links may still be used to rejoin the family.",
+    "createFailed": "Failed to create family"
   },
   "tasks": {
     "title": "Tasks",
@@ -60,6 +69,13 @@
     "pending": "To Do",
     "cameraPermission": "Camera permission is needed",
     "maxSubmissions": "Maximum submissions reached",
+    "submitBlockedTitle": "Can't submit right now",
+    "submitTaskArchived": "Mom/Dad has put this mission away. Check your mission list.",
+    "submitInstanceGone": "This mission record no longer exists. The task may have changed.",
+    "submitNotSubmittable": "This mission just changed. Check your mission list for the latest.",
+    "submitMaxReached": "No more tries for this mission today. Come back tomorrow!",
+    "backToTasks": "Back to missions",
+    "loadingTasks": "Loading missions…",
     "attempts": "attempts",
     "templates": "Templates",
     "useTemplate": "Use Template",

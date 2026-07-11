@@ -13,6 +13,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
@@ -48,6 +49,7 @@ const AVATAR_EMOJIS = [
 
 export default function FamilyScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const uid = auth().currentUser?.uid;
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -112,25 +114,20 @@ export default function FamilyScreen() {
 
   const handleCreateFamily = async () => {
     if (!uid || !familyName.trim()) return;
-    const ref = await firestore().collection('families').add({
-      displayName: familyName.trim(),
-      defaultGraceDays: 2,
-      createdBy: uid,
-      createdAt: firestore.FieldValue.serverTimestamp(),
-    });
-    await firestore()
-      .collection('familyMemberships')
-      .doc(`${uid}_${ref.id}`)
-      .set({
-        familyId: ref.id,
-        userId: uid,
-        role: 'parent',
-        status: 'active',
-        invitedBy: uid,
-        joinedAt: firestore.FieldValue.serverTimestamp(),
-      });
-    setFamilyName('');
-    setShowCreateFamily(false);
+    try {
+      // R3 審查修正：建家庭改走 bootstrapParentAccount CF——守衛（ALREADY_IN_FAMILY
+      // 一帳號一家庭）只在 CF 交易內，client 直寫會繞過；rules 已同步收回
+      // families/familyMemberships 的 client create 許可。user doc 已存在（能進到
+      // 這個畫面的前提）→ CF 不會動它，只補 family＋parent membership。
+      const fn = functions().httpsCallable('bootstrapParentAccount');
+      await fn({ familyName: familyName.trim() });
+      setFamilyName('');
+      setShowCreateFamily(false);
+    } catch (e: any) {
+      let msg = e?.message ?? t('family.createFailed');
+      if (/ALREADY_IN_FAMILY/.test(msg)) msg = t('auth.alreadyInFamily');
+      Alert.alert(t('family.createFailed'), msg);
+    }
   };
 
   const handleInviteByEmail = async () => {
@@ -552,7 +549,6 @@ export default function FamilyScreen() {
       <ManageMemberModal
         member={manageMember}
         currentUid={uid}
-        familyCreatedBy={family.createdBy}
         onClose={() => setManageMember(null)}
       />
     </SafeAreaView>
@@ -562,14 +558,13 @@ export default function FamilyScreen() {
 function ManageMemberModal({
   member,
   currentUid,
-  familyCreatedBy,
   onClose,
 }: {
   member: MemberRow | null;
   currentUid: string | undefined;
-  familyCreatedBy: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
 
@@ -584,9 +579,10 @@ function ManageMemberModal({
 
   const isSelf = member.membership.userId === currentUid;
   const isChild = member.membership.role === 'child';
-  const isCreator = currentUid === familyCreatedBy;
-  // 小孩：任何家長可移除。家長：只有 family 建立者可移除，且不能移除自己。
-  const canRemove = !isSelf && (isChild || isCreator);
+  // R3-3 審查修正：CF 只允許移除小孩（ONLY_CHILD_REMOVABLE），對齊政策把
+  // 「移除家長」按鈕一併下架（原本 creator 看其他家長會顯示必失敗的死路按鈕）。
+  // 家長互移待 co-parent 政策設計後與 CF 一起放寬。
+  const canRemove = !isSelf && isChild;
 
   const handleSave = async () => {
     try {
@@ -614,13 +610,29 @@ function ManageMemberModal({
           style: 'destructive',
           onPress: async () => {
             try {
-              await firestore()
-                .collection('familyMemberships')
-                .doc(member.membership.id)
-                .update({ status: 'removed' });
+              // R3-3：移除走 CF（原子完成 membership 標 removed＋作廢 pending 邀請）。
+              // rules 已禁止 client 直改 status:'removed'。
+              const fn = functions().httpsCallable('removeFamilyMember');
+              const res: any = await fn({
+                familyId: member.membership.familyId,
+                memberUserId: member.membership.userId,
+              });
               onClose();
+              // legacy 成員找不到 email → CF 跳過作廢邀請並回傳 warning，
+              // 必須讓家長知道 pending 邀請仍有效（否則靜默留下可重新入家的邀請）。
+              if (res?.data?.warning === 'NO_EMAIL_SKIP_REVOKE') {
+                Alert.alert(
+                  t('family.removeDoneTitle'),
+                  t('family.removeInviteNotRevoked')
+                );
+              }
             } catch (e: any) {
-              Alert.alert('移除失敗', e?.message || '不明錯誤');
+              let msg = e?.message || '不明錯誤';
+              if (/NOT_PARENT/.test(msg)) msg = t('family.removeNotParent');
+              if (/MEMBER_NOT_FOUND/.test(msg)) msg = t('family.removeMemberNotFound');
+              if (/CANNOT_REMOVE_SELF/.test(msg)) msg = t('family.removeCannotRemoveSelf');
+              if (/ONLY_CHILD_REMOVABLE/.test(msg)) msg = t('family.removeOnlyChildRemovable');
+              Alert.alert(t('family.removeFailed'), msg);
             }
           },
         },

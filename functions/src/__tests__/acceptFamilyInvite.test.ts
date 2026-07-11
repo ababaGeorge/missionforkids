@@ -115,6 +115,29 @@ describe('acceptFamilyInvite', () => {
     expect(second).toEqual(first);
   });
 
+  // R3-3：removeFamilyMember 作廢的邀請不可再被接受。
+  // 現況「非 pending 即擋」自動涵蓋 revoked——本案例把這個涵蓋釘進測試，防未來改成枚舉比對漏掉。
+  it('R3-3：invite 已被作廢（revoked）→ failed-precondition INVITE_ALREADY_USED', async () => {
+    await seedInvite('inv-13', 'fam-13', {
+      status: 'revoked',
+      revokedAt: FieldValue.serverTimestamp(),
+      revokedBy: 'parent-1',
+    });
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-13' },
+        auth: { uid: 'child-uid-13', token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/INVITE_ALREADY_USED/);
+
+    const db = admin.firestore();
+    // 不得建出 membership / 錢包；invite 維持 revoked
+    const mem = await db.collection('familyMemberships').doc('child-uid-13_fam-13').get();
+    expect(mem.exists).toBe(false);
+    const invDoc = await db.collection('familyInvites').doc('inv-13').get();
+    expect(invDoc.data()!.status).toBe('revoked');
+  });
+
   it('invite 已被別人接受 → failed-precondition INVITE_ALREADY_USED', async () => {
     await seedInvite('inv-5', 'fam-5', { status: 'accepted', acceptedBy: 'someone-else' });
     await expect(
@@ -181,9 +204,13 @@ describe('acceptFamilyInvite', () => {
     } as any);
 
     const db = admin.firestore();
-    // 小孩已賺到 20 點，之後被家長移除（family.tsx 的移除只改 status）
+    // 小孩已賺到 20 點，之後被家長移除（鏡像 removeFamilyMember 的寫入：status＋審計欄）
     await db.collection('pointWallets').doc(`${familyId}_${uid}`).update({ balance: 20 });
-    await db.collection('familyMemberships').doc(`${uid}_${familyId}`).update({ status: 'removed' });
+    await db.collection('familyMemberships').doc(`${uid}_${familyId}`).update({
+      status: 'removed',
+      removedAt: FieldValue.serverTimestamp(),
+      removedBy: 'parent-uid-9',
+    });
 
     // 家長對同一 email 再開一張邀請
     await seedInvite('inv-9b', familyId);
@@ -195,12 +222,66 @@ describe('acceptFamilyInvite', () => {
 
     const memDoc = await db.collection('familyMemberships').doc(`${uid}_${familyId}`).get();
     expect(memDoc.data()).toMatchObject({ status: 'active', childId: uid, userId: uid });
+    // reactivate 必須清掉移除審計欄（否則 active doc 帶著 removedAt，審計語意矛盾）
+    expect(memDoc.data()!.removedAt).toBeUndefined();
+    expect(memDoc.data()!.removedBy).toBeUndefined();
 
     const walletDoc = await db.collection('pointWallets').doc(`${familyId}_${uid}`).get();
     expect(walletDoc.data()!.balance).toBe(20); // 點數保留
 
     const invDoc = await db.collection('familyInvites').doc('inv-9b').get();
     expect(invDoc.data()).toMatchObject({ status: 'accepted', acceptedBy: uid });
+  });
+
+  // R3-1 補充：「無任何 membership → 過」由第一個案例覆蓋、「同家庭非 active reactivate → 過」
+  // 由上面 inv-9 案例覆蓋（兩者都會經過新守衛的查詢）。以下兩案例補跨家庭正反面。
+  it('R3-1：已是別的家庭 active 成員 → 接新家庭邀請被擋 ALREADY_IN_FAMILY，invite 不被消耗', async () => {
+    const uid = 'child-uid-11';
+    await seedInvite('inv-11a', 'fam-11a');
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-11a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    // 家庭 B 對同一 email 開邀請
+    await seedInvite('inv-11b', 'fam-11b');
+    await expect(
+      fft.wrap(acceptFamilyInvite)({
+        data: { inviteId: 'inv-11b' },
+        auth: { uid, token: { email: 'kid@example.com' } },
+      } as any)
+    ).rejects.toThrow(/ALREADY_IN_FAMILY/);
+
+    const db = admin.firestore();
+    // 交易整體回滾：家庭 B 不得殘留 membership / 錢包，invite 維持 pending
+    const memB = await db.collection('familyMemberships').doc(`${uid}_fam-11b`).get();
+    expect(memB.exists).toBe(false);
+    const walletB = await db.collection('pointWallets').doc(`fam-11b_${uid}`).get();
+    expect(walletB.exists).toBe(false);
+    const invDoc = await db.collection('familyInvites').doc('inv-11b').get();
+    expect(invDoc.data()!.status).toBe('pending');
+  });
+
+  it('R3-1：舊家庭 membership 已 removed（非 active）→ 接新家庭邀請可過', async () => {
+    const uid = 'child-uid-12';
+    await seedInvite('inv-12a', 'fam-12a');
+    await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-12a' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+
+    const db = admin.firestore();
+    await db.collection('familyMemberships').doc(`${uid}_fam-12a`).update({ status: 'removed' });
+
+    await seedInvite('inv-12b', 'fam-12b');
+    const res: any = await fft.wrap(acceptFamilyInvite)({
+      data: { inviteId: 'inv-12b' },
+      auth: { uid, token: { email: 'kid@example.com' } },
+    } as any);
+    expect(res).toEqual({ familyId: 'fam-12b', childId: uid });
+
+    const memB = await db.collection('familyMemberships').doc(`${uid}_fam-12b`).get();
+    expect(memB.data()).toMatchObject({ status: 'active', familyId: 'fam-12b' });
   });
 
   it('legacy 家長（doc id ≠ uid、authProviderId 匹配）接受 child 邀請 → ALREADY_PARENT，不遮蔽', async () => {

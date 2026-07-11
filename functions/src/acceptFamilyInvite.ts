@@ -73,6 +73,20 @@ export const acceptFamilyInvite = onCall(async (request) => {
       throw new HttpsError('failed-precondition', 'ALREADY_PARENT');
     }
 
+    // R3-1：擋跨家庭雙 active membership——一個帳號同時只能屬於一個家庭。
+    // 過濾掉本邀請的 familyId：同家庭 reactivate（被移除後重新受邀）不受影響。
+    // 已 accepted 的冪等回傳在上方先行，不會被此守衛擋到。
+    // equality-only 查詢不需新複合索引；此 read 在所有 write 之前（transaction 規則）。
+    const activeMemsSnap = await tx.get(
+      db
+        .collection('familyMemberships')
+        .where('userId', '==', uid)
+        .where('status', '==', 'active')
+    );
+    if (activeMemsSnap.docs.some((d) => d.data()?.familyId !== familyId)) {
+      throw new HttpsError('failed-precondition', 'ALREADY_IN_FAMILY');
+    }
+
     const profile = invite.childProfile ?? {};
 
     // user doc：不存在才建（重複接受第二張邀請時不整份覆寫既有 profile）。
@@ -104,9 +118,15 @@ export const acceptFamilyInvite = onCall(async (request) => {
         avatarEmoji: profile.avatarEmoji ?? null,
       });
     } else if (memSnap.data()?.status !== 'active') {
-      // 被移除（status: 'removed'）的成員重新受邀 → 只把 status 復原成 active。
+      // 被移除（status: 'removed'）的成員重新受邀 → status 復原 active，
+      // 並清掉 removeFamilyMember 寫入的移除審計欄（否則 doc 同時是 active
+      // 又帶 removedAt/removedBy，審計語意自相矛盾）。
       // 不動 joinedAt / childId / 暱稱；錢包照「存在就不動」規則，點數保留。
-      tx.update(memRef, { status: 'active' });
+      tx.update(memRef, {
+        status: 'active',
+        removedAt: FieldValue.delete(),
+        removedBy: FieldValue.delete(),
+      });
     }
 
     // 確定性錢包 {familyId}_{childId}；childId == uid，故 doc id 與既有 userId 慣例一致。

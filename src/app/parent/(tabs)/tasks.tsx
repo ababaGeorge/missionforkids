@@ -20,7 +20,9 @@ import { memberName } from '../../../lib/memberName';
 import {
   assignedUserIds,
   planAssignmentChanges,
+  IN_PROGRESS_STATUSES,
 } from '../../../lib/taskAssignments';
+import { updateInstanceIfStatusIn } from '../../../lib/instances';
 import { P, spacing, radius } from '../../../design/tokens';
 import { Starfield } from '../../../design/Starfield';
 import { RoughStar } from '../../../design/RoughStar';
@@ -758,13 +760,30 @@ function CreateTaskModal({
             gracePeriodEnd,
           });
         }
-        // 被移除的孩子 → 只把「進行中」的 instance 標 missed（保留歷史，不刪）；
-        // approved 是點數帳本對應的歷史，覆寫會毀掉紀錄。
+        // 被移除的孩子 → 只把「進行中」的 instance 標 missed（保留歷史，不刪）。
+        // R3-6：走交易守衛 updateInstanceIfStatusIn，來源狀態限 IN_PROGRESS_STATUSES。
+        // 防線定位（審查釐清）：approved 在 firestore.rules（R2-CX1 轉移矩陣）本來
+        // 就是 client 終態，裸寫打不穿帳本歷史；本守衛的實際價值是把「plan 算完到
+        // 寫入之間被核准/已 missed」的單筆競態變成可辨識的守衛碼靜默跳過，
+        // 不再讓 rules 拒絕冒成整批移除中斷＋神祕「儲存失敗」訊息。
         for (const inst of plan.markMissed) {
-          await firestore()
-            .collection('taskInstances')
-            .doc(inst.id)
-            .update({ status: 'missed' });
+          try {
+            await updateInstanceIfStatusIn(inst.id, IN_PROGRESS_STATUSES, {
+              status: 'missed',
+            });
+          } catch (err: any) {
+            // R3-6 審查修正：只吞兩個守衛碼——INSTANCE_NOT_SUBMITTED（競態，規格
+            // 授權的「已核准/已 missed」靜默跳過）與 INSTANCE_GONE（doc 已刪，跳過
+            // 語意相同）。其餘錯誤（網路 unavailable、permission-denied…）重拋交
+            // 外層 catch 跳「儲存失敗」Alert、modal 不關——否則離線時解除指派會
+            // 靜默假成功，instance 留在 pending，小孩照樣提交、被核准、領點。
+            // 重試安全：重存時 plan 重算，已標 missed 的筆會落進守衛碼跳過。
+            const code = err?.message as string;
+            if (code !== 'INSTANCE_GONE' && code !== 'INSTANCE_NOT_SUBMITTED') {
+              throw err;
+            }
+            console.warn(`markMissed 跳過 instance ${inst.id}（${code}）`);
+          }
         }
         onClose();
         return;

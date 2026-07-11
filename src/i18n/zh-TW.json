@@ -27,7 +27,8 @@
     "forgotPassword": "忘記密碼？",
     "resetEmailSent": "重設信已寄出，請查收",
     "resetEmailEmptyEmail": "請先填寫 Email",
-    "resetEmailFailed": "重設信寄送失敗，請稍後再試"
+    "resetEmailFailed": "重設信寄送失敗，請稍後再試",
+    "alreadyInFamily": "你已加入其他家庭，須先離開原家庭才能加入新家庭"
   },
   "family": {
     "createFamily": "建立家庭",
@@ -35,7 +36,15 @@
     "inviteMember": "邀請成員",
     "members": "家庭成員",
     "childName": "孩子名稱",
-    "birthday": "生日"
+    "birthday": "生日",
+    "removeFailed": "移除失敗",
+    "removeNotParent": "只有這個家庭的家長可以移除成員",
+    "removeMemberNotFound": "找不到這位成員，可能已經被移除了",
+    "removeCannotRemoveSelf": "不能把自己移出家庭",
+    "removeOnlyChildRemovable": "目前只能移除小孩成員",
+    "removeDoneTitle": "已移除成員",
+    "removeInviteNotRevoked": "這位成員的資料缺少 email，先前寄給他的邀請無法自動作廢。尚未使用的邀請連結仍可能被用來重新加入家庭。",
+    "createFailed": "建立家庭失敗"
   },
   "tasks": {
     "title": "任務",
@@ -60,6 +69,13 @@
     "pending": "待完成",
     "cameraPermission": "請允許使用相機",
     "maxSubmissions": "已達提交上限",
+    "submitBlockedTitle": "沒辦法提交",
+    "submitTaskArchived": "這個任務已經被爸媽收起來了，回任務清單看看吧。",
+    "submitInstanceGone": "這筆任務紀錄已經不存在了，可能任務有異動。",
+    "submitNotSubmittable": "這個任務的狀態剛剛變了，回任務清單看看最新狀態。",
+    "submitMaxReached": "這個任務今天不能再提交了，明天再來吧。",
+    "backToTasks": "回任務清單",
+    "loadingTasks": "任務載入中…",
     "attempts": "次提交",
     "templates": "範本",
     "useTemplate": "使用範本",

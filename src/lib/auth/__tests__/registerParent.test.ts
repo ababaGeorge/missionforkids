@@ -101,6 +101,31 @@ describe('registerParent', () => {
     expect(signOut).toHaveBeenCalled();
   });
 
+  // R3 審查修正：ALREADY_IN_FAMILY 與 ALREADY_CHILD 同為永久性衝突，比照登出
+  it('CF 拋 ALREADY_IN_FAMILY → 先登出再拋錯，不殘留既有帳號 session', async () => {
+    const createUser = (auth as any).__mocks.createUserWithEmailAndPassword;
+    const signIn = (auth as any).__mocks.signInWithEmailAndPassword;
+    const signOut = (auth as any).__mocks.signOut;
+    createUser.mockRejectedValue(
+      Object.assign(new Error('email in use'), { code: 'auth/email-already-in-use' })
+    );
+    signIn.mockResolvedValue({ user: { uid: 'member-uid' } });
+    const callable = jest.fn(async () => {
+      throw new Error('ALREADY_IN_FAMILY');
+    });
+    (functions as any).__mocks.httpsCallable.mockReturnValue(callable);
+
+    await expect(
+      registerParent({
+        email: 'member@example.com',
+        password: 'secret123',
+        displayName: '媽媽',
+        familyName: '我們家',
+      })
+    ).rejects.toThrow('ALREADY_IN_FAMILY');
+    expect(signOut).toHaveBeenCalled();
+  });
+
   it('CF 拋非角色衝突錯誤（網路/冷啟動）→ 不登出，保留 session 供重試恢復', async () => {
     const createUser = (auth as any).__mocks.createUserWithEmailAndPassword;
     const signOut = (auth as any).__mocks.signOut;
