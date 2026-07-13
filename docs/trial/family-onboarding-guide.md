@@ -9,14 +9,16 @@
   - 小孩裝置改登入家長的 Apple ID 來安裝，或
   - 由家長拿小孩的裝置代為安裝。
 
-## TestFlight 連結
+## TestFlight 邀請連結
 
-（送審通過後填入）
+TestFlight 邀請連結會由我們**私下傳給你**（例如透過 LINE 或訊息），不放在這份公開文件裡。收到連結後，點開就能安裝。
+
+> 注意：連結需等 Apple 的 beta 審查通過後才能安裝；在那之前點開會顯示「尚未開放」，屬正常，請稍候我們通知。
 
 ## 家長步驟
 
 1. 在家長的裝置安裝 **TestFlight**（App Store 搜尋 TestFlight）。
-2. 點開上面的 TestFlight 連結，安裝 **Mission for Kids**。
+2. 點開我們傳給你的 TestFlight 邀請連結，安裝 **Mission for Kids**。
 3. 打開 App，註冊家長帳號（Email＋密碼＋暱稱）。
 4. 建立家庭（輸入家庭名稱）。
 5. 到家庭頁，點右下角「**邀請小孩**」，填小孩姓名與 Email 後送出。
