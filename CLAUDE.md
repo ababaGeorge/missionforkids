@@ -31,3 +31,7 @@
 - 設計文件：`docs/design-core-loop-ai-demo.md`
 - 測試方式：iOS 模擬器
 - 進度狀態見 `handoffs/` 下最新的 handoff 檔案
+
+## 共同交付與收尾（2026-10-04）
+
+共通收尾要求集中在 [AGENTS.md](AGENTS.md) 與 [工作交付與收尾](docs/WORK_CLOSEOUT.md)。一般已交辦開發的正常存檔使用本次已確認授權；保留其餘 Claude 專屬、產品與安全約定。
